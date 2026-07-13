@@ -1,3 +1,6 @@
 from django.contrib import admin
 
-# Register your models here.
+from .models import GameAccount,DailySnapshot
+
+admin.site.register(GameAccount)
+admin.site.register(DailySnapshot)
