@@ -130,3 +130,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
     ],
 }
+<<<<<<< HEAD
+STEAM_API_KEY = config("STEAM_API_KEY")
+=======
+>>>>>>> bc1398d74d6e09cd75c7e8a028fcc2447166c69c
