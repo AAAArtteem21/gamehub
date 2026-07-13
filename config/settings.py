@@ -26,6 +26,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_ratelimit',
+
 
     'rest_framework',
     
@@ -77,6 +79,15 @@ DATABASES = {
         'PASSWORD':config('DB_PASSWORD'),
         'HOST': config('DB_HOST',default='localhost'),
         'PORT': config('DB_PORT',default='5432'),
+    }
+}
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": config('REDIS_URL', default='redis://127.0.0.1:6379/1'),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
     }
 }
 
