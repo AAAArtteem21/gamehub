@@ -20,6 +20,11 @@ class GameAccount(models.Model):
     verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     last_synced_at = models.DateTimeField(null=True,blank=True)
+    nickname = models.CharField(max_length=100, blank=True)
+    avatar = models.URLField(blank=True)
+    skill_rating = models.IntegerField(null=True, blank=True, help_text="ELO/MMR — если платформа его даёт")
+    game_label = models.CharField(max_length=50, blank=True, help_text="Человекочитаемое название игры для лидерборда")
+    extra_stats = models.JSONField(null=True, blank=True, help_text="Доп. статистика: winrate, топ герои и т.д.")
 
     class Meta:
         unique_together = ("platform", "external_id")

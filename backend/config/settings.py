@@ -71,9 +71,13 @@ AUTHENTICATION_BACKENDS = (
 SOCIAL_AUTH_STEAM_API_KEY = config('STEAM_API_KEY')
 SOCIAL_AUTH_URL_NAMESPACE = 'social'
 
+FACEIT_API_KEY = config('FACEIT_API_KEY')
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 LOGIN_REDIRECT_URL = '/api/auth/steam/complete/'
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/api/auth/steam/complete/'
+
 SOCIAL_AUTH_LOGIN_ERROR_URL = '/api/auth/steam/error/'
 
 SOCIAL_AUTH_PIPELINE = (
@@ -125,13 +129,15 @@ DATABASES = {
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": config('REDIS_URL', default='redis://127.0.0.1:6379/1'),
+        "LOCATION": "redis://127.0.0.1:6379/1",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
+            "CONNECTION_POOL_KWARGS": {
+                "protocol": 2
+            }
+        }
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -165,6 +171,7 @@ STATIC_URL = 'static/'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        "rest_framework.authentication.SessionAuthentication",
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
@@ -182,10 +189,3 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Europe/Kyiv'
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": config('REDIS_URL', default='redis://localhost:6379/1'),
-        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
-    }
-}

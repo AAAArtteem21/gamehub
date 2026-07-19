@@ -9,8 +9,8 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
 app.conf.beat_schedule = {
-    'sync-game-accounts-daily': {
+    'sync-game-accounts-every-hour': {
         'task': 'apps.profiles.tasks.sync_all_game_accounts',
-        'schedule': crontab(hour=0, minute=0),
+        'schedule': crontab(minute=0),  # раз в час, а не раз в сутки — так статистика свежее
     },
 }

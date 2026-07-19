@@ -1,6 +1,7 @@
 import requests
 from django.conf import settings
 
+
 class SteamClient:
     BASE_URL = "https://api.steampowered.com"
 
@@ -15,8 +16,32 @@ class SteamClient:
             "include_appinfo": True,
             "include_played_free_games": True,
         }
+
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
+
         return response.json().get("response", {}).get("games", [])
-    
-    #alooo
+
+    def get_player_summary(self, steam_id):
+
+        url = f"{self.BASE_URL}/ISteamUser/GetPlayerSummaries/v2/"
+
+        params = {
+            "key": self.api_key,
+            "steamids": steam_id,
+        }
+
+        response = requests.get(
+            url,
+            params=params,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        players = response.json().get("response", {}).get("players", [])
+
+        if players:
+            return players[0]
+
+        return None
