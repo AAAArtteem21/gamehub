@@ -11,18 +11,21 @@ const loading = ref(true)
 const error = ref(null)
 const showConnectModal = ref(false)
 const syncingIds = ref(new Set())
-const activeStatsTab = ref(null) // account.id выбранной вкладки со статистикой
+const activeStatsTab = ref(null)
 
-const platformLabels = { steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota', manual: 'Ручной' }
+const platformLabels = { steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota', pubg: 'PUBG', manual: 'Ручной' }
 
-// платформы, у которых вообще есть детальная статистика (не просто часы)
 const statsAccounts = computed(() =>
-  accounts.value.filter(a => a.platform === 'opendota' || a.platform === 'faceit')
+  accounts.value.filter(a => ['opendota', 'faceit', 'lol'].includes(a.platform))
 )
 
 const activeAccount = computed(() =>
   statsAccounts.value.find(a => a.id === activeStatsTab.value) || statsAccounts.value[0]
 )
+
+function getAccount(platform) {
+  return accounts.value.find(a => a.platform === platform)
+}
 
 async function loadAccounts() {
   loading.value = true
@@ -110,7 +113,6 @@ onMounted(loadAccounts)
         </div>
       </div>
 
-      <!-- ЕДИНАЯ переключаемая карточка статистики -->
       <div class="card stats-switcher-card" v-if="statsAccounts.length">
         <div class="stats-tabs">
           <button
@@ -131,7 +133,6 @@ onMounted(loadAccounts)
         <div v-else class="empty-hint">Нажми ↻ на {{ platformLabels[activeAccount?.platform] }}, чтобы подтянуть статистику</div>
       </div>
 
-      <!-- простые часы всех Steam-игр -->
       <div class="card games-table-card" v-if="steamGamesFlat().length">
         <h3 class="card-title table-title">Библиотека Steam — все игры</h3>
         <table class="games-table">
@@ -176,10 +177,7 @@ onMounted(loadAccounts)
 
 .stats-switcher-card { display: flex; flex-direction: column; gap: 18px; }
 .stats-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-wrap: wrap; }
-.stats-tab {
-  background: none; border: none; color: var(--text-secondary); font-size: 13px; font-weight: 600;
-  padding: 7px 14px; border-radius: 20px; cursor: pointer; transition: all 0.2s var(--ease);
-}
+.stats-tab { background: none; border: none; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 20px; cursor: pointer; transition: all 0.2s var(--ease); }
 .stats-tab:hover { color: var(--text-primary); background: var(--bg-card-hover); }
 .stats-tab.active { background: var(--accent-dim); color: var(--accent); }
 .empty-hint { color: var(--text-secondary); font-size: 13px; text-align: center; padding: 20px 0; }
@@ -199,4 +197,4 @@ onMounted(loadAccounts)
 .state-message { padding: 60px 20px; text-align: center; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .error-state { color: var(--danger); }
-</style>Preferences: Open User Settings (JSON)
+</style>

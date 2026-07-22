@@ -7,6 +7,7 @@ class GameAccount(models.Model):
         ("steam", "Steam"),
         ("faceit", "Faceit"),
         ("opendota", "OpenDota"),
+        ("lol", "League of Legends"),
         ("manual", "Manual"),
     ]
 

@@ -45,3 +45,12 @@ class SteamClient:
             return players[0]
 
         return None
+    
+    def get_cs2_stats(self, steam_id: str):
+        url = f"{self.BASE_URL}/ISteamUserStats/GetUserStatsForGame/v2/"
+        params = {"key": self.api_key, "steamid": steam_id, "appid": 730}
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 400:
+            return None
+        response.raise_for_status()
+        return response.json().get("playerstats", {}).get("stats", [])

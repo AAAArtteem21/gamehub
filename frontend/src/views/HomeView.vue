@@ -76,8 +76,11 @@ onMounted(async () => {
         <div class="leaderboard-list">
           <div v-for="(player, i) in leaderboard" :key="i" class="leaderboard-item">
             <span class="rank" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-            <span class="player-name">{{ player.username }}</span>
-            <span class="player-rating">{{ player.skill_rating }}</span>
+            <RouterLink :to="`/players/${player.user_id}`" class="player-name">{{ player.username }}</RouterLink>
+            <div class="player-stats">
+              <span class="player-matches">{{ player.matches }} матчей</span>
+              <span class="player-winrate">{{ player.winrate }}% побед</span>
+            </div>
           </div>
           <div v-if="leaderboard.length === 0" class="empty">Пока нет данных по этой игре</div>
         </div>
@@ -87,6 +90,15 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.leaderboard-item { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border-color); }
+.leaderboard-item:last-child { border-bottom: none; }
+.rank { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--bg-card-hover); font-size: 12px; font-weight: 700; color: var(--text-secondary); flex-shrink: 0; }
+.rank.top { background: var(--accent-dim); color: var(--accent); }
+.player-name { flex: 1; font-size: 13px; font-weight: 600; color: var(--text-primary); text-decoration: none; }
+.player-name:hover { color: var(--accent); }
+.player-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.player-matches { font-size: 11px; color: var(--text-secondary); }
+.player-winrate { font-size: 12px; color: var(--accent); font-weight: 700; }
 .dashboard { display: flex; flex-direction: column; gap: 20px; }
 .hero { padding: 40px; }
 .hero h1 { font-size: 32px; line-height: 1.2; margin: 0 0 12px; }

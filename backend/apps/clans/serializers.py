@@ -12,14 +12,21 @@ class ClanMembershipSerializer(serializers.ModelSerializer):
 class ClanSerializer(serializers.ModelSerializer):
     members_count = serializers.SerializerMethodField()
     invite_code = serializers.SerializerMethodField()
+    is_member = serializers.SerializerMethodField()
 
     class Meta:
         model = Clan
-        fields = ["id", "name", "owner", "logo", "description", "invite_code", "members_count", "created_at"]
+        fields = ["id", "name", "owner", "logo", "description", "invite_code", "is_member", "members_count", "created_at"]
         read_only_fields = ["owner", "created_at"]
 
     def get_members_count(self, obj):
         return getattr(obj, "members_count_annotated", None) or obj.memberships.count()
+
+    def get_is_member(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return ClanMembership.objects.filter(clan=obj, user=request.user).exists()
 
     def get_invite_code(self, obj):
         request = self.context.get("request")
@@ -29,27 +36,29 @@ class ClanSerializer(serializers.ModelSerializer):
             clan=obj, user=request.user, role="leader"
         ).exists()
         return obj.invite_code if is_leader else None
-    
+
     def validate_name(self, value):
-        validate_clan_name(value)
-        return value.strip()
-    
+        value = value.strip()
+        if len(value) < 3:
+            raise serializers.ValidationError("Название клана должно быть не короче 3 символов")
+        if len(value) > 100:
+            raise serializers.ValidationError("Название клана слишком длинное")
+        return value
+
     def validate(self, attrs):
-        request = self.context['request']
+        request = self.context["request"]
         if self.instance is None:
             owned_count = Clan.objects.filter(owner=request.user).count()
-            if owned_count >= MAX_CLAN_PER_USER:
-                raise serializers.ValidationError(
-                    f'Нельзя создать больше {MAX_CLAN_PER_USER} кланнов'
-                )
-        return attrs 
+            if owned_count >= 3:
+                raise serializers.ValidationError("Нельзя создать больше 3 кланов")
+        return attrs
 
-    def create(self,validated_data):
-        request = self.context['request']
-        validated_data['owner'] = request.user
+    def create(self, validated_data):
+        request = self.context["request"]
+        validated_data["owner"] = request.user
         clan = super().create(validated_data)
-        ClanMembership.objects.create(clan=clan,user=request.user,role='leader')
-        return clan 
+        ClanMembership.objects.create(clan=clan, user=request.user, role="leader")
+        return clan
     
 class JoinClanSerializer(serializers.Serializer):
     invite_code = serializers.CharField(max_length=12)

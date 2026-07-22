@@ -129,12 +129,13 @@ class LFGPostSerializer(serializers.ModelSerializer):
         return data
 
 class LFGChatMessageSerializer(serializers.ModelSerializer):
+    sender_id = serializers.IntegerField(source='sender.id', read_only=True)
     sender_username = serializers.CharField(source='sender.username', read_only=True)
     sender_avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = LFGChatMessage
-        fields = ['id', 'post', 'sender_username', 'sender_avatar', 'text', 'created_at']
+        fields = ['id', 'post', 'sender_id', 'sender_username', 'sender_avatar', 'text', 'created_at']
         read_only_fields = ['created_at']
 
     def get_sender_avatar(self, obj):

@@ -70,7 +70,7 @@ AUTHENTICATION_BACKENDS = (
 
 SOCIAL_AUTH_STEAM_API_KEY = config('STEAM_API_KEY')
 SOCIAL_AUTH_URL_NAMESPACE = 'social'
-
+PUBG_API_KEY = config('PUBG_API_KEY')
 FACEIT_API_KEY = config('FACEIT_API_KEY')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -180,6 +180,7 @@ REST_FRAMEWORK = {
 }
 
 STEAM_API_KEY = config("STEAM_API_KEY")
+RIOT_API_KEY =config('RIOT_API_KEY')
 
 
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')

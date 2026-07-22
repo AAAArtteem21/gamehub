@@ -97,17 +97,28 @@ class LeaderboardView(APIView):
         if game:
             qs = qs.filter(game_label__iexact=game)
 
-       
         accounts = list(qs)
-        accounts.sort(key=lambda a: (a.skill_rating or 0, (a.extra_stats or {}).get('total_matches', 0) or (a.extra_stats or {}).get('matches', 0)), reverse=True)
+
+        def sort_key(acc):
+            stats = acc.extra_stats or {}
+            return acc.skill_rating or stats.get("total_matches", 0) or stats.get("matches", 0) or 0
+
+        accounts.sort(key=sort_key, reverse=True)
         accounts = accounts[:10]
 
-        data = [{
-            "user_id": acc.user.id,
-            "username": acc.user.username,
-            "platform": acc.platform,
-            "skill_rating": acc.skill_rating,
-        } for acc in accounts]
+        data = []
+        for acc in accounts:
+            stats = acc.extra_stats or {}
+            matches = stats.get("total_matches") or stats.get("matches") or 0
+            winrate = stats.get("winrate", 0)
+            data.append({
+                "user_id": acc.user.id,
+                "username": acc.user.username,
+                "platform": acc.platform,
+                "skill_rating": acc.skill_rating,
+                "matches": matches,
+                "winrate": winrate,
+            })
         return Response(data)
 class PublicProfileView(APIView):
     permission_classes = [permissions.IsAuthenticated]

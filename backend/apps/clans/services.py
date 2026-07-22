@@ -9,12 +9,15 @@ from .models import ClanMembership,Clan
 from apps.profiles.models import DailySnapshot
 
 
+# apps/clans/services.py
+from collections import defaultdict
+from datetime import timedelta
+from django.utils import timezone as dj_timezone
+from .models import Clan, ClanMembership
+from apps.profiles.models import DailySnapshot
+
+
 def _period_activity(user_ids, start_date, end_date):
-    """
-    Правильный расчёт активности за период: для каждой (юзер, игра) пары
-    берём разницу между последним известным значением playtime_forever
-    в периоде и последним известным значением ДО начала периода.
-    """
     snapshots = (
         DailySnapshot.objects
         .filter(game_account__user_id__in=user_ids, date__lte=end_date)
@@ -22,7 +25,7 @@ def _period_activity(user_ids, start_date, end_date):
         .order_by('date')
     )
 
-    points = defaultdict(list)  # (user_id, appid) -> [(date, playtime_forever), ...]
+    points = defaultdict(list)
     for s in snapshots:
         points[(s.game_account.user_id, s.appid)].append((s.date, s.playtime_forever))
 
@@ -38,8 +41,9 @@ def _period_activity(user_ids, start_date, end_date):
         if not in_period:
             continue
         latest_val = in_period[-1][1]
-        base_val = baseline if baseline is not None else in_period[0][1]
-        result[user_id] += max(latest_val - base_val, 0)
+        if baseline is None:
+            continue
+        result[user_id] += max(latest_val - baseline, 0)
 
     return result
 

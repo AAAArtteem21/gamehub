@@ -13,6 +13,7 @@ const platforms = [
   { value: 'steam', label: 'Steam', hint: 'Steam ID64 (17 цифр)' },
   { value: 'faceit', label: 'Faceit', hint: 'Player ID или никнейм' },
   { value: 'opendota', label: 'OpenDota (Dota 2)', hint: 'Account ID (число)' },
+  { value: 'lol', label: 'League of Legends', hint: 'Ник#TAG (Riot ID)' },
 ]
 
 async function submit() {
