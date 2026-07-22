@@ -67,29 +67,19 @@ class ClanViewSet(viewsets.ModelViewSet):
         clan = self.get_object()
         target_user_id = request.data.get("user_id")
 
-        requester_membership = ClanMembership.objects.filter(
-            clan=clan, user=request.user
-        ).first()
+        requester_membership = ClanMembership.objects.filter(clan=clan, user=request.user).first()
         if not requester_membership or requester_membership.role not in ("leader", "officer"):
-            return Response(
-                {"detail": "Только лидер или офицер могут исключать участников"},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({"detail": "Только лидер или офицер могут исключать участников"}, status=status.HTTP_403_FORBIDDEN)
 
-        target_membership = ClanMembership.objects.filter(
-            clan=clan, user_id=target_user_id
-        ).first()
+        target_membership = ClanMembership.objects.filter(clan=clan, user_id=target_user_id).first()
         if not target_membership:
             return Response({"detail": "Участник не найден"}, status=status.HTTP_404_NOT_FOUND)
 
         if target_membership.role == "leader":
-            return Response(
-                {"detail": "Нельзя исключить лидера клана"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"detail": "Нельзя исключить лидера клана"}, status=status.HTTP_400_BAD_REQUEST)
 
         target_membership.delete()
-        return Response({"detail": "Участник исключён"}, status=status.HTTP_200_OK)
+        return Response({"detail": "Участник исключён"})
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def leave(self, request, pk=None):
@@ -106,3 +96,28 @@ class ClanViewSet(viewsets.ModelViewSet):
 
         membership.delete()
         return Response({"detail": "Ты покинул клан"}, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def change_role(self, request, pk=None):
+        clan = self.get_object()
+        target_user_id = request.data.get("user_id")
+        new_role = request.data.get("role")
+
+        if new_role not in ("member", "officer", "leader"):
+            return Response({"detail": "Недопустимая роль"}, status=status.HTTP_400_BAD_REQUEST)
+
+        requester_membership = ClanMembership.objects.filter(clan=clan, user=request.user).first()
+        if not requester_membership or requester_membership.role != "leader":
+            return Response({"detail": "Только лидер может менять роли"}, status=status.HTTP_403_FORBIDDEN)
+
+        target_membership = ClanMembership.objects.filter(clan=clan, user_id=target_user_id).first()
+        if not target_membership:
+            return Response({"detail": "Участник не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+        if new_role == "leader":
+            requester_membership.role = "officer"
+            requester_membership.save(update_fields=["role"])
+
+        target_membership.role = new_role
+        target_membership.save(update_fields=["role"])
+        return Response({"detail": "Роль обновлена"})

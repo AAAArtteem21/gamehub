@@ -1,35 +1,138 @@
-@import './base.css';
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  font-weight: normal;
+:root {
+  --bg-primary: #0A0C10;
+  --bg-card: #14171E;
+  --bg-card-hover: #1A1E27;
+  --border-color: #23272F;
+  --border-hover: #333944;
+  --accent: #E63946;
+  --accent-hover: #FF4757;
+  --accent-dim: rgba(230, 57, 70, 0.14);
+  --accent-glow: rgba(230, 57, 70, 0.35);
+  --text-primary: #F5F6F8;
+  --text-secondary: #8B90A0;
+  --text-muted: #5A5F6D;
+  --success: #4ADE80;
+  --danger: #F87171;
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-glow: 0 0 24px var(--accent-glow);
+
+  --ease: cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
+* {
+  box-sizing: border-box;
 }
 
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
+html {
+  scroll-behavior: smooth;
 }
 
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
+body {
+  margin: 0;
+  background: radial-gradient(ellipse at top, #12151C 0%, #0A0C10 60%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* скроллбар */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2A2F3A; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #3A404D; }
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  transition: border-color 0.25s var(--ease), transform 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+
+.card:hover {
+  border-color: var(--border-hover);
+}
+
+button {
+  font-family: inherit;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+/* общие анимации, переиспользуемые везде */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.fade-in-up { animation: fadeInUp 0.35s var(--ease) both; }
+.fade-in { animation: fadeIn 0.25s var(--ease) both; }
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color: white;
+  border: none;
+  padding: 11px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.15s var(--ease), box-shadow 0.25s var(--ease);
+  box-shadow: 0 4px 14px rgba(230, 57, 70, 0.25);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(230, 57, 70, 0.4);
+}
+
+.btn-secondary {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 11px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease), transform 0.15s var(--ease);
+}
+
+.btn-secondary:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+
+.page-enter-active { animation: fadeInUp 0.3s var(--ease); }

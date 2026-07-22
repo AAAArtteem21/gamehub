@@ -1,7 +1,7 @@
 from datetime import date 
 from rest_framework import serializers
 from .models import GameAccount,DailySnapshot
-from .serivces import get_daily_playtime
+from .serivces import get_daily_playtime,build_display_stats
 from .validators import validate_external_id
 
 
@@ -19,21 +19,33 @@ class DailySnapshotSerializer(serializers.ModelSerializer):
         return get_daily_playtime(obj.game_account,obj.appid,obj.date)
     
     def get_is_estimated(self,obj):
-        return obj.game_account.plaform in ESTIMATED_PLATFORMS
+        return obj.game_account.platform in ESTIMATED_PLATFORMS
     
 
 class GameAccountSerializer(serializers.ModelSerializer):
     snapshots = serializers.SerializerMethodField()
+    display_stats = serializers.SerializerMethodField()
 
     class Meta:
         model = GameAccount
-        fields = ['id','user','platform','external_id','verified','created_at','snapshots']
-        read_only_fields = ['user','verified','created_at']
+        fields = [
+            'id', 'user', 'platform', 'external_id', 'nickname', 'avatar',
+            'verified', 'created_at', 'snapshots', 'extra_stats',
+            'skill_rating', 'game_label', 'display_stats',
+        ]
+        read_only_fields = ['user', 'verified', 'created_at', 'extra_stats', 'skill_rating', 'game_label']
+
+    def get_display_stats(self, obj):
+        return build_display_stats(obj.platform, obj.extra_stats)
 
 
-    def get_snapshots(self,obj):
-        recent = obj.snapshots.filter(date__gte=date.today().replace(day=1))
-        return DailySnapshotSerializer(recent,many=True).data 
+    def get_snapshots(self, obj):
+        recent = (
+            obj.snapshots
+            .filter(date__gte=date.today().replace(day=1))
+            .order_by('-playtime_forever')
+        )
+        return DailySnapshotSerializer(recent, many=True).data
     
     def validate(self,attrs):
         platform = attrs.get('platform')
