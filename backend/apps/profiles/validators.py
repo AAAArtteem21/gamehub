@@ -13,9 +13,15 @@ def validate_external_id(platform, external_id):
     elif platform == "faceit":
         if len(external_id) < 3:
             raise ValidationError("Faceit player_id/nickname слишком короткий")
-    elif platform == "pubg":
-        if len(external_id) < 3:
-            raise ValidationError("Укажи корректный PUBG никнейм (Steam)")
     elif platform == "lol":
         if "#" not in external_id:
             raise ValidationError("Укажи в формате Ник#TAG (Riot ID)")
+    elif platform == "valorant":
+        if "#" not in external_id:
+            raise ValidationError("Укажи в формате Ник#TAG (Riot ID)")
+    elif platform == "pubg":
+        if len(external_id) < 3:
+            raise ValidationError("Укажи корректный никнейм PUBG (Steam)")
+    elif platform == "roblox":
+        if len(external_id) < 3:
+            raise ValidationError("Укажи корректный никнейм Roblox")

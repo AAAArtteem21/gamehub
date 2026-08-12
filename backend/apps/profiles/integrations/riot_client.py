@@ -41,3 +41,9 @@ class RiotClient:
         r = requests.get(url, headers=self.headers, timeout=10)
         r.raise_for_status()
         return r.json()
+
+    def get_challenger_league(self, region="euw1"):
+        url = f"https://{region}.api.riotgames.com/lol/league/v4/challengerleagues/by-queue/RANKED_SOLO_5x5"
+        r = requests.get(url, headers=self.headers, timeout=10)
+        r.raise_for_status()
+        return r.json()

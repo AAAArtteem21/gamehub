@@ -8,6 +8,9 @@ class GameAccount(models.Model):
         ("faceit", "Faceit"),
         ("opendota", "OpenDota"),
         ("lol", "League of Legends"),
+        ("valorant", "Valorant"),
+        ("pubg", "PUBG"),
+        ("roblox", "Roblox"),
         ("manual", "Manual"),
     ]
 

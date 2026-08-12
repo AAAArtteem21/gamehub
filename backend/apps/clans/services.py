@@ -40,13 +40,18 @@ def _period_activity(user_ids, start_date, end_date):
                 in_period.append((d, val))
         if not in_period:
             continue
+
         latest_val = in_period[-1][1]
-        if baseline is None:
-            continue
-        result[user_id] += max(latest_val - baseline, 0)
+        if baseline is not None:
+
+            base_val = baseline
+        else:
+
+            base_val = in_period[0][1]
+
+        result[user_id] += max(latest_val - base_val, 0)
 
     return result
-
 
 def get_clan_dashboard(clan: Clan):
     today = dj_timezone.now().date()

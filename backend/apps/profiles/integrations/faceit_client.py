@@ -30,3 +30,8 @@ class FaceitClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def get_match_stats(self, match_id):
+        r = requests.get(f"{self.BASE_URL}/matches/{match_id}/stats", headers=self.headers, timeout=10)
+        r.raise_for_status()
+        return r.json()

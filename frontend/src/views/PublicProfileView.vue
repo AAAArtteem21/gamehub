@@ -9,7 +9,10 @@ const profile = ref(null)
 const loading = ref(true)
 const error = ref(null)
 
-const platformLabels = { steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota' }
+const platformLabels = {
+  steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota',
+  lol: 'League of Legends', valorant: 'Valorant', pubg: 'PUBG', roblox: 'Roblox',
+}
 
 async function load() {
   loading.value = true
@@ -44,6 +47,7 @@ onMounted(load)
       <div class="avatar-big" :style="profile.avatar_url ? { backgroundImage: `url(${profile.avatar_url})` } : {}"></div>
       <div>
         <h1>{{ profile.display_name || profile.username }}</h1>
+        <p class="views-count" v-if="profile.views_count !== undefined">👁 {{ profile.views_count }} просмотров</p>
       </div>
     </div>
 
@@ -83,4 +87,5 @@ onMounted(load)
 .hours-cell { font-weight: 600; }
 .state-message { padding: 60px 20px; text-align: center; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
 .error-state { color: var(--danger); }
+.views-count { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
 </style>
