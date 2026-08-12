@@ -14,4 +14,10 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"Profile of {self.user}"
     
-    
+class ProfileView(models.Model):
+    viewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="views_made")
+    viewed_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="views_received")
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["viewed_user", "viewed_at"])]

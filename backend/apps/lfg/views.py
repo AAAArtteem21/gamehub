@@ -9,6 +9,7 @@ from django.db.models import Count,Q
 from .models import LFGChatMessage
 from .serializers import LFGChatMessageSerializer
 from django.utils import timezone
+from datetime import timedelta
 
 from .models import LFGPost,LFGResponse,ContactReveal,LFGChatMessage
 from .serializers import LFGPostSerializer,LFGResponseSerializer
@@ -37,6 +38,8 @@ class LFGPostViewSet(viewsets.ModelViewSet):
             qs = qs.filter(status=status_param)
         else:
             qs = qs.filter(status='open')
+            cutoff = timezone.now() - timedelta(hours=1)
+            qs = qs.exclude(datetime__lt=cutoff)
 
         return qs
 
@@ -120,3 +123,15 @@ class MyChatThreadsView(APIView):
             })
         threads.sort(key=lambda t: t["last_message_at"], reverse=True)
         return Response(threads)
+
+class QuickStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps.clans.models import ClanMembership
+        user = request.user
+        return Response({
+            "open_lfg": LFGPost.objects.filter(author=user, status='open').count(),
+            "unread_chats": 0,  
+            "clans_count": ClanMembership.objects.filter(user=user).count(),
+        })

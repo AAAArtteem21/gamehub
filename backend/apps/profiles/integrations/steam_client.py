@@ -54,3 +54,10 @@ class SteamClient:
             return None
         response.raise_for_status()
         return response.json().get("playerstats", {}).get("stats", [])
+    
+    def get_player_summaries(self, steam_ids: list):
+        url = f"{self.BASE_URL}/ISteamUser/GetPlayerSummaries/v2/"
+        params = {"key": self.api_key, "steamids": ",".join(steam_ids)}
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json().get("response", {}).get("players", [])

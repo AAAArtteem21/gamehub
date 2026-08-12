@@ -1,41 +1,18 @@
-
 import requests
 from django.conf import settings
 
 
 class PubgClient:
-    BASE_URL = "https://api.pubg.com/shards/steam"
+    """Через TRN (tracker.gg developers) — тот же провайдер, что и Fortnite"""
+    BASE_URL = "https://public-api.tracker.gg/v2/pubg/standard"
 
     def __init__(self):
-        self.headers = {
-            "Authorization": f"Bearer {settings.PUBG_API_KEY}",
-            "Accept": "application/vnd.api+json",
-        }
+        self.headers = {"TRN-Api-Key": settings.TRN_API_KEY}
 
-    def get_player(self, player_name):
+    def get_profile(self, platform, player_name):
         r = requests.get(
-            f"{self.BASE_URL}/players",
-            params={"filter[playerNames]": player_name},
+            f"{self.BASE_URL}/profile/{platform}/{player_name}",
             headers=self.headers, timeout=10,
         )
         r.raise_for_status()
-        data = r.json()["data"]
-        if not data:
-            raise ValueError("Игрок не найден в PUBG")
-        return data[0]
-
-    def get_season_stats(self, account_id, season_id):
-        r = requests.get(
-            f"{self.BASE_URL}/players/{account_id}/seasons/{season_id}",
-            headers=self.headers, timeout=10,
-        )
-        r.raise_for_status()
-        return r.json()
-
-    def get_current_season_id(self):
-        r = requests.get(f"{self.BASE_URL}/seasons", headers=self.headers, timeout=10)
-        r.raise_for_status()
-        for season in r.json()["data"]:
-            if season["attributes"]["isCurrentSeason"]:
-                return season["id"]
-        return None
+        return r.json()["data"]

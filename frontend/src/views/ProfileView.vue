@@ -13,10 +13,16 @@ const showConnectModal = ref(false)
 const syncingIds = ref(new Set())
 const activeStatsTab = ref(null)
 
-const platformLabels = { steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota', pubg: 'PUBG', manual: 'Ручной' }
+const platformLabels = {
+  steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota',
+  lol: 'League of Legends', valorant: 'Valorant', pubg: 'PUBG', roblox: 'Roblox', manual: 'Ручной',
+}
 
 const statsAccounts = computed(() =>
-  accounts.value.filter(a => ['opendota', 'faceit', 'lol'].includes(a.platform))
+  accounts.value.filter(a =>
+    ['opendota', 'faceit', 'lol', 'valorant', 'pubg', 'roblox'].includes(a.platform)
+    || (a.platform === 'steam' && a.display_stats)
+  )
 )
 
 const activeAccount = computed(() =>
@@ -174,7 +180,14 @@ onMounted(loadAccounts)
 .verified-dot.ok { background: var(--success); }
 .icon-btn { background: var(--bg-card-hover); border: 1px solid var(--border-color); color: var(--text-secondary); width: 26px; height: 26px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .icon-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
-
+.steam-cs2-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat-box { display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--bg-primary); border-radius: var(--radius-sm); padding: 10px 6px; }
+.stat-value { font-size: 18px; font-weight: 800; }
+.stat-value.win { color: var(--success); }
+.stat-value.accent { color: var(--accent); }
+.stat-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
+.card-title { margin: 0 0 14px; font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
+.card-title .subtitle { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
 .stats-switcher-card { display: flex; flex-direction: column; gap: 18px; }
 .stats-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-wrap: wrap; }
 .stats-tab { background: none; border: none; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 20px; cursor: pointer; transition: all 0.2s var(--ease); }

@@ -14,8 +14,10 @@ const platforms = [
   { value: 'faceit', label: 'Faceit', hint: 'Player ID или никнейм' },
   { value: 'opendota', label: 'OpenDota (Dota 2)', hint: 'Account ID (число)' },
   { value: 'lol', label: 'League of Legends', hint: 'Ник#TAG (Riot ID)' },
+  { value: 'valorant', label: 'Valorant', hint: 'Ник#TAG (Riot ID)' },
+  { value: 'pubg', label: 'PUBG', hint: 'Ник в PUBG (Steam)' },
+  { value: 'roblox', label: 'Roblox', hint: 'Никнейм Roblox' },
 ]
-
 async function submit() {
   submitting.value = true
   errors.value = {}
