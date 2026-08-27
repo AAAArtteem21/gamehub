@@ -4,6 +4,8 @@ from rest_framework import viewsets,permissions,status
 from rest_framework.decorators import action 
 from rest_framework.response import Response 
 from rest_framework.views import APIView
+import threading
+from django.core.cache import cache
 
 from .models import GameAccount
 from .serializers import GameAccountSerializer
@@ -16,6 +18,18 @@ MAX_ACCOUNTS_PER_PLATFORM = 1
 
 def _list_cache_key(user_id):
     return f'game_accounts:{user_id}'
+
+def _run_sync_in_background(account_id):
+    from .models import GameAccount
+    try:
+        account = GameAccount.objects.get(id=account_id)
+        ProfileSyncService(account).sync()
+        cache.set(f"sync_status:{account_id}", {"status": "done"}, timeout=300)
+    except Exception as e:
+        cache.set(f"sync_status:{account_id}", {"status": "error", "detail": str(e)}, timeout=300)
+    finally:
+        cache.delete(f"profile_sync_cooldown:{account_id}")
+
 
 class GameAccountViewSet(viewsets.ModelViewSet):
     serializer_class = GameAccountSerializer
@@ -69,19 +83,25 @@ class GameAccountViewSet(viewsets.ModelViewSet):
 
         if cache.get(cooldown_key):
             return Response(
-                {"detail": "Синхронизация уже запускалась недавно, попробуй через несколько минут"},
+                {"detail": "Синхронизация уже запущена, подожди немного"},
                 status=status.HTTP_429_TOO_MANY_REQUESTS
             )
 
-        try:
-            ProfileSyncService(account).sync()
-        except SyncError as e:
-            return Response({"detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
+        cache.set(cooldown_key, True, timeout=300)
+        cache.set(f"sync_status:{account.id}", {"status": "syncing"}, timeout=300)
 
-        cache.set(cooldown_key, True, timeout=SYNC_COOLDOWN_SECONDS)
-        cache.delete(_list_cache_key(request.user.id))
+        thread = threading.Thread(target=_run_sync_in_background, args=(account.id,), daemon=True)
+        thread.start()
 
-        return Response(self.get_serializer(account).data)
+        return Response({"detail": "Синхронизация запущена"}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=["get"])
+    def sync_status(self, request, pk=None):
+        account = self.get_object()
+        status_data = cache.get(f"sync_status:{account.id}", {"status": "idle"})
+        if status_data.get("status") == "done":
+            return Response({**status_data, "account": self.get_serializer(account).data})
+        return Response(status_data)
     
     @action(detail=True,methods=['get'])
     def summary(self,request,pk=None):
@@ -125,20 +145,31 @@ class PublicProfileView(APIView):
 
     def get(self, request, user_id):
         from django.contrib.auth import get_user_model
-        from apps.users.models import ProfileView
+        from apps.users.models import ProfileView as ProfileViewModel
+
         User = get_user_model()
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({"detail": "Игрок не найден"}, status=404)
 
-        # засчитываем просмотр, только если смотрит НЕ сам владелец профиля
-        views_count = ProfileView.objects.filter(viewed_user=user).count()
+        views_count = ProfileViewModel.objects.filter(viewed_user=user).count()
         if request.user.id != user.id:
-            ProfileView.objects.create(viewer=request.user, viewed_user=user)
+            ProfileViewModel.objects.create(viewer=request.user, viewed_user=user)
             views_count += 1
 
         accounts = GameAccount.objects.filter(user=user).prefetch_related("snapshots")
+
+        accounts_data = []
+        for acc in accounts:
+            try:
+                serialized = GameAccountSerializer(acc, context={"request": request}).data
+                accounts_data.append(serialized)
+            except Exception as e:
+                # не роняем весь профиль из-за одного проблемного аккаунта —
+                # пропускаем его, но остальные данные юзер всё равно увидит
+                continue
+
         profile = getattr(user, "profile", None)
 
         return Response({
@@ -146,7 +177,7 @@ class PublicProfileView(APIView):
             "display_name": profile.display_name if profile else user.username,
             "avatar_url": profile.avatar_url if profile else None,
             "views_count": views_count,
-            "accounts": GameAccountSerializer(accounts, many=True, context={"request": request}).data,
+            "accounts": accounts_data,
         })
 
 class WorldLeaderboardView(APIView):
@@ -189,35 +220,87 @@ class WorldLeaderboardView(APIView):
             } for e in entries]
             return Response(data)
 
+        if game == "cs2":
+            cached = cache.get("world_leaderboard_cs2")
+            if cached:
+                return Response(cached)
+
+            from .integrations.faceit_client import FaceitClient
+            client = FaceitClient()
+            try:
+                ranking = client.get_global_ranking(region="EU", limit=15)
+            except Exception:
+                return Response({"detail": "Не удалось загрузить лидерборд CS2"}, status=502)
+
+            data = []
+            for entry in ranking:
+                player = entry.get("player", {})
+                gh_account = GameAccount.objects.filter(
+                    platform="faceit", external_id=player.get("nickname", "")
+                ).first()
+                data.append({
+                    "external_id": player.get("user_id"),
+                    "name": player.get("nickname", "Игрок"),
+                    "avatar": player.get("avatar"),
+                    "subtitle": player.get("country", "").upper(),
+                    "value": f"ELO {entry.get('faceit_elo', '—')}",
+                    "guest_link": None,  # у Faceit нет отдельного гостевого просмотра, только сам GameEyes-профиль, если зарегистрирован
+                    "gamehub_user_id": gh_account.user_id if gh_account else None,
+                })
+
+            cache.set("world_leaderboard_cs2", data, timeout=6 * 60 * 60)
+            return Response(data)
+
         return Response([], status=200)
 
 class GuestProfileView(APIView):
-    """GET /api/guest-profile/dota2/{account_id}/ — статистика игрока, даже если он не на GameHub"""
+    """GET /api/guest-profile/dota2/{external_id}/ — статистика ЛЮБОГО игрока, зарегистрирован он или нет"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, game, external_id):
-        if game == "dota2":
-            from .integrations.opendota_client import OpenDotaClient
-            client = OpenDotaClient()
-            try:
-                player = client.get_player(external_id)
-                wl = client.get_win_loss(external_id)
-            except Exception:
-                return Response({"detail": "Игрок не найден"}, status=404)
+        if game != "dota2":
+            return Response({"detail": "Гостевой просмотр поддерживается только для Dota 2"}, status=400)
 
-            return Response({
-                "display_name": player.get("profile", {}).get("personaname", "Неизвестно"),
-                "avatar_url": player.get("profile", {}).get("avatarfull"),
-                "is_registered_on_gamehub": GameAccount.objects.filter(platform="opendota", external_id=external_id).exists(),
-                "stats": {
-                    "wins": wl.get("win", 0),
-                    "losses": wl.get("lose", 0),
-                    "mmr_estimate": player.get("mmr_estimate", {}).get("estimate"),
-                    "rank_tier": player.get("rank_tier"),
-                },
-            })
+        from .integrations.opendota_client import OpenDotaClient
+        from .integrations.steam_client import SteamClient
 
-        return Response({"detail": "Платформа не поддерживает гостевой просмотр"}, status=400)
+        client = OpenDotaClient()
+        try:
+            player = client.get_player(external_id)
+            wl = client.get_win_loss(external_id)
+        except Exception:
+            return Response({"detail": "Игрок не найден или профиль полностью закрыт"}, status=404)
+
+        profile_data = player.get("profile", {}) or {}
+        is_public = bool(profile_data.get("personaname"))
+
+        heroes_data = []
+        try:
+            heroes_raw = client.get_heroes(external_id)
+            hero_names = client.get_hero_names()
+            top = sorted(heroes_raw, key=lambda h: h.get("games", 0), reverse=True)[:5]
+            heroes_data = [
+                {"name": hero_names.get(h["hero_id"], "?"), "games": h.get("games", 0),
+                 "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0}
+                for h in top if h.get("games", 0) > 0
+            ]
+        except Exception:
+            pass
+
+        gh_account = GameAccount.objects.filter(platform="opendota", external_id=str(external_id)).select_related("user").first()
+
+        return Response({
+            "is_public": is_public,
+            "display_name": profile_data.get("personaname") if is_public else None,
+            "avatar_url": profile_data.get("avatarfull") if is_public else None,
+            "is_gamehub_user": bool(gh_account),
+            "gamehub_user_id": gh_account.user_id if gh_account else None,
+            "wins": wl.get("win", 0),
+            "losses": wl.get("lose", 0),
+            "mmr_estimate": player.get("mmr_estimate", {}).get("estimate"),
+            "rank_tier": player.get("rank_tier"),
+            "top_heroes": heroes_data,
+        })
 
 class WorldLeaderboardView(APIView):
     """GET /api/world-leaderboard/?game=dota2|lol"""
@@ -269,9 +352,107 @@ class MatchParticipantsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, game, match_id):
-        if game != "dota2":
-            return Response({"detail": "Игра не поддерживается"}, status=400)
+        if game == "dota2":
+            return self._dota_participants(match_id)
+        if game == "valorant":
+            return self._valorant_participants(match_id)
+        if game =="lol":
+            return self._lol_participants(match_id)
+        return Response({"detail": "Игра не поддерживается"}, status=400)
 
+    def _lol_participants(self, match_id):
+        from .integrations.riot_client import RiotClient
+        client = RiotClient()
+        try:
+            match = client.get_match_details(match_id)
+            timeline = client.get_match_timeline(match_id)
+        except Exception:
+            return Response({"detail": "Матч не найден"}, status=404)
+
+        participant_id_to_name = {
+            p["participantId"]: p["riotIdGameName"] for p in match["info"]["participants"]
+        }
+
+        kill_events = []
+        for frame in timeline.get("info", {}).get("frames", []):
+            for event in frame.get("events", []):
+                if event.get("type") == "CHAMPION_KILL":
+                    kill_events.append({
+                        "killer": participant_id_to_name.get(event.get("killerId"), "Environment"),
+                        "victim": participant_id_to_name.get(event.get("victimId"), "?"),
+                        "timestamp_ms": event.get("timestamp"),
+                    })
+
+        participants = []
+        for p in match["info"]["participants"]:
+            gh_account = GameAccount.objects.filter(
+                platform="lol", external_id__istartswith=p.get("riotIdGameName", "")
+            ).select_related("user").first()
+            participants.append({
+                "name": p.get("riotIdGameName"),
+                "champion": p.get("championName"),
+                "kda": f"{p.get('kills',0)}/{p.get('deaths',0)}/{p.get('assists',0)}",
+                "team": p.get("teamId"),
+                "won": p.get("win"),
+                "is_gamehub_user": bool(gh_account),
+                "gamehub_user_id": gh_account.user_id if gh_account else None,
+            })
+
+        return Response({"participants": participants, "kill_timeline": kill_events})
+
+    def _valorant_participants(self, match_id):
+        from .integrations.valorant_client import ValorantClient
+        client = ValorantClient()
+        try:
+            detail = client.get_match_details(match_id)
+        except Exception:
+            return Response({"detail": "Матч не найден"}, status=404)
+
+        players = detail.get("players", {}).get("all_players", [])
+        puuid_to_name = {p.get("puuid"): f"{p.get('name')}#{p.get('tag')}" for p in players}
+
+        participants = []
+        for p in players:
+            riot_id = f"{p.get('name')}#{p.get('tag')}"
+            gh_account = GameAccount.objects.filter(platform="valorant", external_id__iexact=riot_id).select_related("user").first()
+            stats = p.get("stats", {})
+            participants.append({
+                "riot_id": riot_id,
+                "display_name": p.get("name"),
+                "avatar": p.get("assets", {}).get("card", {}).get("small"),
+                "agent": p.get("character"),
+                "team": p.get("team"),
+                "kda": f"{stats.get('kills',0)}/{stats.get('deaths',0)}/{stats.get('assists',0)}",
+                "is_gamehub_user": bool(gh_account),
+                "gamehub_user_id": gh_account.user_id if gh_account else None,
+            })
+
+        # раунды с покилловой разбивкой — структура HenrikDev может отличаться версией API,
+        # если поля не совпадут, пришли сырой detail.get("rounds") и я поправлю маппинг
+        rounds_data = []
+        for i, rnd in enumerate(detail.get("rounds", [])):
+            kills = []
+            for player_stat in rnd.get("player_stats", []):
+                for kill_event in player_stat.get("kill_events", []) or []:
+                    killer = puuid_to_name.get(kill_event.get("killer_puuid"), "?")
+                    victim = puuid_to_name.get(kill_event.get("victim_puuid"), "?")
+                    kills.append({
+                        "killer": killer, "victim": victim,
+                        "weapon": kill_event.get("damage_weapon_name"),
+                        "time_in_round": kill_event.get("kill_time_in_round"),
+                    })
+            rounds_data.append({"round_number": i + 1, "winning_team": rnd.get("end_result"), "kills": kills})
+
+        teams = detail.get("teams", {})
+        return Response({
+            "participants": participants,
+            "map": detail.get("metadata", {}).get("map"),
+            "red_won": teams.get("red", {}).get("has_won"),
+            "blue_won": teams.get("blue", {}).get("has_won"),
+            "rounds": rounds_data,
+        })
+
+    def _dota_participants(self, match_id):
         from .integrations.opendota_client import OpenDotaClient
         from .integrations.steam_client import SteamClient
 

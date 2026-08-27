@@ -30,3 +30,8 @@ class ValorantClient:
         r = requests.get(f"{self.BASE_URL}/v1/mmr-history/{region}/{name}/{tag}", headers=self.headers, timeout=10)
         r.raise_for_status()
         return r.json()["data"]
+
+    def get_match_details(self, match_id, region="eu"):
+        r = requests.get(f"{self.BASE_URL}/v2/match/{match_id}", headers=self.headers, timeout=10)
+        r.raise_for_status()
+        return r.json()["data"]

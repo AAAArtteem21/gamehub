@@ -12,6 +12,7 @@ class GameAccount(models.Model):
         ("pubg", "PUBG"),
         ("roblox", "Roblox"),
         ("manual", "Manual"),
+        ("fortnite", "Fortnite"),
     ]
 
     user = models.ForeignKey(

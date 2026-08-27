@@ -44,4 +44,13 @@ class OpenDotaClient:
         r = requests.get(f"{self.BASE_URL}/constants/items", timeout=10)
         r.raise_for_status()
         data = r.json()
-        return {v.get("id"): v.get("dname", key) for key, v in data.items() if isinstance(v, dict) and v.get("id") is not None}
+        result = {}
+        for key, v in data.items():
+            if isinstance(v, dict) and v.get("id") is not None:
+                img_path = v.get("img", "")
+                result[v["id"]] = {
+                    "key": key,
+                    "name": v.get("dname", key),
+                    "icon_url": f"https://cdn.cloudflare.steamstatic.com{img_path}" if img_path else None,
+                }
+        return result

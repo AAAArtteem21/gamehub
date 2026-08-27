@@ -4,6 +4,7 @@ from rest_framework import viewsets,permissions,status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Count
+from rest_framework.views import APIView
 
 from .models import Clan,ClanMembership
 from .serializers import (
@@ -121,3 +122,35 @@ class ClanViewSet(viewsets.ModelViewSet):
         target_membership.role = new_role
         target_membership.save(update_fields=["role"])
         return Response({"detail": "Роль обновлена"})
+
+
+class ClanLeaderboardView(APIView):
+    """GET /api/clans/leaderboard/ — топ кланов по суммарной активности участников за месяц"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .services import _period_activity
+        from django.utils import timezone as dj_timezone
+        from datetime import timedelta
+
+        today = dj_timezone.now().date()
+        month_ago = today - timedelta(days=30)
+
+        clans = Clan.objects.annotate(members_count_annotated=Count("memberships"))
+        result = []
+        for clan in clans:
+            user_ids = list(ClanMembership.objects.filter(clan=clan).values_list("user_id", flat=True))
+            if not user_ids:
+                continue
+            activity = _period_activity(user_ids, month_ago, today)
+            total_minutes = sum(activity.values())
+            result.append({
+                "id": clan.id,
+                "name": clan.name,
+                "logo": clan.logo,
+                "members_count": clan.members_count_annotated,
+                "total_month_minutes": total_minutes,
+            })
+
+        result.sort(key=lambda c: c["total_month_minutes"], reverse=True)
+        return Response(result[:10])

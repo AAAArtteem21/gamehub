@@ -8,7 +8,57 @@ from .integrations.steam_client import SteamClient
 from .integrations.opendota_client import OpenDotaClient
 from .integrations.faceit_client import FaceitClient
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
+
+def _format_match_time(seconds):
+    if seconds is None:
+        return None
+    sign = "-" if seconds < 0 else ""
+    seconds = abs(seconds)
+    m, s = divmod(seconds, 60)
+    return f"{sign}{m}:{s:02d}"
+
+
+def _extract_items_with_timing(my_slot, item_names):
+    purchase_log = my_slot.get("purchase_log") or []
+    items = []
+    for slot in range(6):
+        item_id = my_slot.get(f"item_{slot}")
+        if not item_id or item_id not in item_names:
+            continue
+        info = item_names[item_id]
+        bought_at = None
+        for entry in reversed(purchase_log):
+            if entry.get("key") == info["key"]:
+                bought_at = entry.get("time")
+                break
+        items.append({
+            "name": info["name"],
+            "icon_url": info["icon_url"],
+            "bought_at": _format_match_time(bought_at),
+        })
+    return items
+
+
+def _compute_match_verdict(my_slot, won):
+    kills = my_slot.get("kills", 0)
+    deaths = my_slot.get("deaths", 0)
+    assists = my_slot.get("assists", 0)
+    kda = (kills + assists) / max(deaths, 1)
+
+    if not won and deaths >= 10 and kda < 1:
+        return {"label": "Соляново", "tone": "terrible"}
+    if kda >= 6:
+        return {"label": "Огромный импакт", "tone": "great"}
+    if kda >= 3.5:
+        return {"label": "Хорошая игра", "tone": "good"}
+    if kda >= 1.8:
+        return {"label": "Нормально", "tone": "neutral"}
+    if kda >= 0.8:
+        return {"label": "Слабая игра", "tone": "bad"}
+    return {"label": "зачем тролишь?", "tone": "terrible"}
 
 class SyncError(Exception):
     pass
@@ -42,6 +92,8 @@ class ProfileSyncService:
                 self._sync_pubg()
             elif self.account.platform == "roblox":
                 self._sync_roblox()
+            elif self.account.platform == "fortnite":
+                self._sync_fortnite()
         except requests.Timeout:
             raise ExternalServiceUnavailable("Внешний сервис не отвечает, попробуй позже")
         except requests.HTTPError as e:
@@ -53,6 +105,29 @@ class ProfileSyncService:
         self.account.last_synced_at = timezone.now()
         self.account.save(update_fields=["verified", "last_synced_at"])
 
+
+    def _sync_fortnite(self):
+        from .integrations.fortnite_client import FortniteClient
+        client = FortniteClient()
+        profile = client.get_profile(self.account.external_id)
+
+        segments = profile.get("segments", [])
+        overview = next((s for s in segments if s.get("type") == "overview"), segments[0] if segments else {})
+        stats = overview.get("stats", {})
+
+        kills = stats.get("kills", {}).get("value", 0)
+        wins = stats.get("wins", {}).get("value", 0)
+        matches = stats.get("matchesPlayed", {}).get("value", 0)
+        kd = stats.get("kd", {}).get("value", 0)
+        top1_pct = stats.get("winRatio", {}).get("value", 0)
+        avg_survival = stats.get("scorePerMatch", {}).get("value", "—")
+
+        self.account.extra_stats = {
+            "matches": matches, "wins": wins, "kills": kills, "kd": kd,
+            "winrate": top1_pct, "avg_score": avg_survival,
+        }
+        self.account.game_label = "Fortnite"
+        self.account.save(update_fields=["extra_stats", "game_label"])
 
     def _sync_lol(self):
         from .integrations.riot_client import RiotClient
@@ -291,7 +366,21 @@ class ProfileSyncService:
         player = client.get_player(self.account.external_id)
         heroes_raw = client.get_heroes(self.account.external_id)
         hero_names = client.get_hero_names()
-        recent_matches = client.get_recent_matches(self.account.external_id, limit=10)
+        item_names = {}
+        try:
+            item_names = client.get_item_names()
+        except Exception:
+            pass
+        recent_matches = client.get_recent_matches(self.account.external_id, limit=6)
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(client.get_match_details, m["match_id"]): m["match_id"] for m in recent_matches}
+            for future in as_completed(futures, timeout=25):  # жёсткий потолок ожидания на всю группу
+                match_id = futures[future]
+                try:
+                    details_by_match[match_id] = future.result(timeout=8)  # на каждый отдельный запрос — до 8 сек
+                except Exception:
+                    details_by_match[match_id] = None
 
         wins = wl.get("win", 0)
         losses = wl.get("lose", 0)
@@ -305,11 +394,29 @@ class ProfileSyncService:
             for h in top_heroes if h.get("games", 0) > 0
         ]
 
+        # параллельно тянем детали всех матчей разом, вместо по одному
+        details_by_match = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(client.get_match_details, m["match_id"]): m["match_id"] for m in recent_matches}
+            try:
+                for future in as_completed(futures, timeout=25):
+                    match_id = futures[future]
+                    try:
+                        details_by_match[match_id] = future.result(timeout=8)
+                    except Exception:
+                        details_by_match[match_id] = None
+            except TimeoutError:
+                # общий таймаут вышел раньше, чем все успели — для недошедших просто ставим None,
+                # а не роняем всю синхронизацию из-за пары медленных матчей
+                for match_id in futures.values():
+                    if match_id not in details_by_match:
+                        details_by_match[match_id] = None
+
         role_labels = {1: "Safe Lane (Carry)", 2: "Mid Lane", 3: "Off Lane", 4: "Jungle"}
         role_counter, gpm_list, xpm_list = {}, [], []
         match_history = []
 
-        for m in recent_matches[:8]:
+        for m in recent_matches:
             is_radiant = m.get("player_slot", 0) < 128
             won = (is_radiant and m.get("radiant_win")) or (not is_radiant and not m.get("radiant_win"))
             hero = hero_names.get(m.get("hero_id"), "?")
@@ -317,41 +424,49 @@ class ProfileSyncService:
 
             role_key = None
             gpm = xpm = cs = hero_damage = None
-            participants = []  # ← список участников этого матча
+            participants = []
+            items = []
+            verdict = None
+            solo = None
 
-            try:
-                detail = client.get_match_details(m["match_id"])
-                my_slot = next(p for p in detail.get("players", []) if p.get("player_slot") == m.get("player_slot"))
-                role_key = "Roaming Support" if my_slot.get("is_roaming") else role_labels.get(my_slot.get("lane_role"))
-                if role_key:
-                    role_counter[role_key] = role_counter.get(role_key, 0) + 1
-                gpm = my_slot.get("gold_per_min")
-                xpm = my_slot.get("xp_per_min")
-                if gpm is not None: gpm_list.append(gpm)
-                if xpm is not None: xpm_list.append(xpm)
-                cs = (my_slot.get("last_hits") or 0) + (my_slot.get("denies") or 0)
-                hero_damage = my_slot.get("hero_damage")
+            detail = details_by_match.get(m["match_id"])
+            if detail:
+                try:
+                    my_slot = next(p for p in detail.get("players", []) if p.get("player_slot") == m.get("player_slot"))
+                    role_key = "Roaming Support" if my_slot.get("is_roaming") else role_labels.get(my_slot.get("lane_role"))
+                    if role_key:
+                        role_counter[role_key] = role_counter.get(role_key, 0) + 1
+                    gpm = my_slot.get("gold_per_min")
+                    xpm = my_slot.get("xp_per_min")
+                    if gpm is not None: gpm_list.append(gpm)
+                    if xpm is not None: xpm_list.append(xpm)
+                    cs = (my_slot.get("last_hits") or 0) + (my_slot.get("denies") or 0)
+                    hero_damage = my_slot.get("hero_damage")
+                    solo = my_slot.get("party_size") == 1
 
-                # ← ВОТ ЗДЕСЬ вставляется твой сниппет — собираем участников матча
-                participants = [
-                    {"account_id": p.get("account_id"), "hero": hero_names.get(p.get("hero_id"), "?"), "is_radiant": p.get("player_slot", 0) < 128}
-                    for p in detail.get("players", []) if p.get("account_id")
-                ]
-            except Exception:
-                pass
+                    participants = [
+                        {"account_id": p.get("account_id"), "hero": hero_names.get(p.get("hero_id"), "?"), "is_radiant": p.get("player_slot", 0) < 128}
+                        for p in detail.get("players", []) if p.get("account_id")
+                    ]
+
+                    items = _extract_items_with_timing(my_slot, item_names)
+                    verdict = _compute_match_verdict(my_slot, won)
+                except Exception:
+                    pass
 
             played_at = None
             if m.get("start_time"):
                 played_at = datetime.fromtimestamp(m["start_time"]).strftime("%d.%m.%Y")
 
             match_history.append({
-                "won": won,
-                "title": hero,
-                "subtitle": kda,
+                "won": won, "title": hero, "subtitle": kda,
                 "match_id": m["match_id"],
                 "duration": f"{round(m.get('duration', 0) / 60)} мин",
                 "played_at": played_at,
-                "participants": participants,  # ← и здесь, в сам объект матча
+                "participants": participants,
+                "items": items,
+                "verdict": verdict,
+                "solo": solo,
                 "details": [
                     {"label": "GPM", "value": gpm if gpm is not None else "—"},
                     {"label": "XPM", "value": xpm if xpm is not None else "—"},
@@ -511,6 +626,24 @@ def build_display_stats(platform, extra_stats):
             "list_title": "Любимые герои",
             "list": [{"name": h["name"], "sub": f"{h['games']} игр", "value": f"{h['winrate']}%", "good": h["winrate"] >= 50} for h in extra_stats.get("top_heroes", [])],
             "match_history": extra_stats.get("match_history", []),
+        }
+
+    if platform == "fortnite":
+        return {
+            "game_label": "Fortnite",
+            "metrics": [
+                {"label": "матчей", "value": extra_stats.get("matches", 0)},
+                {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
+                {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
+                {"label": "K/D", "value": extra_stats.get("kd", 0)},
+            ],
+            "badge": None, "tags": [],
+            "list_title": "Дополнительно",
+            "list": [
+                {"name": "Всего убийств", "sub": "", "value": extra_stats.get("kills", 0)},
+                {"name": "Средний счёт за матч", "sub": "", "value": extra_stats.get("avg_score", "—")},
+            ],
+            "match_history": [],
         }
 
     if platform == "faceit":
