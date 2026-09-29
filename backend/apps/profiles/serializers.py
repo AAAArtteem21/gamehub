@@ -40,12 +40,20 @@ class GameAccountSerializer(serializers.ModelSerializer):
 
 
     def get_snapshots(self, obj):
-        recent = (
-            obj.snapshots
-            .filter(date__gte=date.today().replace(day=1))
-            .order_by('-playtime_forever')
+        from django.db.models import Max
+
+        latest_dates = (
+            obj.snapshots.values("appid")
+            .annotate(max_date=Max("date"))
         )
-        return DailySnapshotSerializer(recent, many=True).data
+        date_map = {r["appid"]: r["max_date"] for r in latest_dates}
+        rows = []
+        for appid, max_date in date_map.items():
+            s = obj.snapshots.filter(appid=appid, date=max_date).first()
+            if s:
+                rows.append(s)
+        rows.sort(key=lambda s: s.playtime_forever or 0, reverse=True)
+        return DailySnapshotSerializer(rows, many=True).data
     
     def validate(self,attrs):
         platform = attrs.get('platform')

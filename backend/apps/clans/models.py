@@ -69,3 +69,17 @@ class ClanMembership(models.Model):
 
     def __str__(self):
         return f'{self.user} - {self.clan} ({self.role})'
+
+class ClanMessage(models.Model):
+    clan = models.ForeignKey("Clan", on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="clan_messages"
+    )
+    text = models.TextField(max_length=1000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.clan_id}:{self.sender_id}:{self.text[:30]}"

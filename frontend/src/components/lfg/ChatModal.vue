@@ -10,45 +10,111 @@ const authStore = useAuthStore()
 const messages = ref([])
 const newMessage = ref('')
 const messagesEnd = ref(null)
-let pollInterval = null
+const isLive = ref(false)
 
-async function loadMessages() {
+let socket = null
+let pollInterval = null
+let fallbackTimer = null
+
+async function loadInitialMessages() {
   const res = await api.get('lfg-chat/', { params: { post: props.post.id } })
   messages.value = res.data.results || res.data
   await nextTick()
+  scrollToEnd()
+}
+
+function scrollToEnd() {
   messagesEnd.value?.scrollIntoView({ behavior: 'smooth' })
+}
+
+function connectSocket() {
+  const token = authStore.token
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const wsHost = window.location.hostname === 'localhost' ? 'localhost:8000' : window.location.host
+
+  socket = new WebSocket(`${wsProtocol}://${wsHost}/ws/lfg-chat/${props.post.id}/?token=${token}`)
+
+  fallbackTimer = setTimeout(() => {
+    if (!isLive.value) {
+      socket?.close()
+      startPollingFallback()
+    }
+  }, 3000)
+
+  socket.onopen = () => {
+    isLive.value = true
+    clearTimeout(fallbackTimer)
+  }
+
+  socket.onmessage = async (event) => {
+    const data = JSON.parse(event.data)
+    messages.value.push(data)
+    await nextTick()
+    scrollToEnd()
+  }
+
+  socket.onclose = () => {
+    if (isLive.value) {
+      isLive.value = false
+      startPollingFallback()
+    }
+  }
+
+  socket.onerror = () => {
+    clearTimeout(fallbackTimer)
+    startPollingFallback()
+  }
+}
+
+function startPollingFallback() {
+  if (pollInterval) return
+  pollInterval = setInterval(loadInitialMessages, 4000)
 }
 
 async function sendMessage() {
   const text = newMessage.value.trim()
   if (!text) return
-  newMessage.value = ''
-  await api.post('lfg-chat/', { post: props.post.id, text })
-  await loadMessages()
+
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ text }))
+    newMessage.value = ''
+  } else {
+    // fallback — отправка через обычный REST, как было раньше
+    newMessage.value = ''
+    await api.post('lfg-chat/', { post: props.post.id, text })
+    await loadInitialMessages()
+  }
 }
 
-onMounted(() => {
-  loadMessages()
-  pollInterval = setInterval(loadMessages, 4000)
+onMounted(async () => {
+  await loadInitialMessages()
+  connectSocket()
 })
 
-onUnmounted(() => clearInterval(pollInterval))
+onUnmounted(() => {
+  clearTimeout(fallbackTimer)
+  clearInterval(pollInterval)
+  socket?.close()
+})
 </script>
 
 <template>
   <div class="overlay" @click.self="emit('close')">
     <div class="chat-modal card fade-in-up">
       <div class="modal-header">
-        <h3>Чат — {{ post.game }}</h3>
+        <div class="header-title">
+          <h3>Чат — {{ post.game }}</h3>
+          <span class="live-indicator" :class="{ live: isLive }">
+            {{ isLive ? '🟢 реалтайм' : '🟡 обновление раз в 4с' }}
+          </span>
+        </div>
         <button class="close-btn" @click="emit('close')">✕</button>
       </div>
 
       <div class="messages">
         <div
-          v-for="msg in messages"
-          :key="msg.id"
-          class="message"
-          :class="{ own: msg.sender_username === authStore.user?.username }"
+          v-for="msg in messages" :key="msg.id"
+          class="message" :class="{ own: msg.sender_username === authStore.user?.username }"
         >
           <RouterLink :to="`/players/${msg.sender_id}`" class="msg-avatar-link" @click="emit('close')">
             <div class="msg-avatar" :style="msg.sender_avatar ? { backgroundImage: `url(${msg.sender_avatar})` } : {}">
@@ -80,8 +146,11 @@ onUnmounted(() => clearInterval(pollInterval))
 <style scoped>
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .chat-modal { width: 460px; max-width: 90vw; height: 580px; display: flex; flex-direction: column; }
-.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.header-title { display: flex; flex-direction: column; gap: 2px; }
 .modal-header h3 { margin: 0; font-size: 15px; }
+.live-indicator { font-size: 10px; color: var(--text-muted); }
+.live-indicator.live { color: var(--success); }
 .close-btn { background: none; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; }
 
 .messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
@@ -96,9 +165,7 @@ onUnmounted(() => clearInterval(pollInterval))
   background-color: var(--accent-dim); background-size: cover; background-position: center;
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; color: var(--accent);
-  transition: box-shadow 0.15s var(--ease);
 }
-.msg-avatar-link:hover .msg-avatar { box-shadow: 0 0 0 2px var(--accent); }
 
 .msg-body { display: flex; flex-direction: column; gap: 3px; max-width: 78%; }
 .msg-top { display: flex; gap: 8px; align-items: baseline; }

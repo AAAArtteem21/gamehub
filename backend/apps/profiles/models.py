@@ -12,6 +12,7 @@ class GameAccount(models.Model):
         ("pubg", "PUBG"),
         ("roblox", "Roblox"),
         ("manual", "Manual"),
+        ("fortnite", "Fortnite"),
     ]
 
     user = models.ForeignKey(
@@ -57,3 +58,69 @@ class DailySnapshot(models.Model):
 
     def __str__(self):
         return f"{self.game_account} — {self.game_name} ({self.date})"
+
+class FavoritePlayer(models.Model):
+    """
+    Избранное: либо user сайта (target_user), либо гость (platform + external_id).
+    """
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="favorites_owned",
+    )
+    target_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="favorited_by",
+    )
+    platform = models.CharField(max_length=32, blank=True, default="")
+    external_id = models.CharField(max_length=128, blank=True, default="")
+    display_name = models.CharField(max_length=128, blank=True, default="")
+    avatar_url = models.URLField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "target_user"],
+                condition=models.Q(target_user__isnull=False),
+                name="uniq_favorite_owner_user",
+            ),
+            models.UniqueConstraint(
+                fields=["owner", "platform", "external_id"],
+                condition=models.Q(external_id__gt=""),
+                name="uniq_favorite_owner_external",
+            ),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        if self.target_user_id:
+            return f"{self.owner_id} → user:{self.target_user_id}"
+        return f"{self.owner_id} → {self.platform}:{self.external_id}"
+
+class ClanActivity(models.Model):
+    KIND_CHOICES = [
+        ("joined", "Joined"),
+        ("match", "Match"),
+        ("other", "Other"),
+    ]
+    clan = models.ForeignKey(
+        "clans.Clan",
+        on_delete=models.CASCADE,
+        related_name="activities",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES, default="other")
+    text = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

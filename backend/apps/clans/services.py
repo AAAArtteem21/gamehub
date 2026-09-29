@@ -100,4 +100,30 @@ def join_clan_by_invite_code(user, invite_code: str) -> ClanMembership:
     if ClanMembership.objects.filter(clan=clan, user=user).exists():
         raise ValueError("Ты уже состоишь в этом клане")
 
-    return ClanMembership.objects.create(clan=clan, user=user, role="member")
+    membership = ClanMembership.objects.create(clan=clan, user=user, role="member")
+
+    try:
+        from apps.profiles.models import ClanActivity
+        ClanActivity.objects.create(
+            clan=clan, user=user, kind="joined",
+            text=f"{user.username} вступил в клан",
+        )
+    except Exception:
+        pass
+
+    try:
+        from apps.users.services import notify
+        from apps.users.xp import add_xp, XP_CLAN_JOIN
+        if clan.owner_id != user.id:
+            notify(
+                clan.owner,
+                kind="clan_join",
+                title="Новый участник",
+                body=f"{user.username} вступил в {clan.name}",
+                link="/clans",
+            )
+        add_xp(user, XP_CLAN_JOIN, reason="вступление в клан")
+    except Exception:
+        pass
+
+    return membership

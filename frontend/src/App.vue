@@ -19,5 +19,6 @@ onMounted(async () => {
 </script>
 
 <template>
+  <ToastHost />
   <RouterView />
 </template>

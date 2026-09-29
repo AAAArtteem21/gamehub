@@ -13,6 +13,9 @@ export const profilesApi = {
   sync(id) {
     return api.post(`game-accounts/${id}/sync/`)
   },
+  syncStatus(id) {
+    return api.get(`game-accounts/${id}/sync_status/`)
+  },
   summary(id) {
     return api.get(`game-accounts/${id}/summary/`)
   },
