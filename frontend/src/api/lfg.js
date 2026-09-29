@@ -4,6 +4,11 @@ export const lfgApi = {
   list(params = {}) {
     return api.get('lfg-posts/', { params })
   },
+  listByUrl(url) {
+    // next/previous от DRF приходят полным URL с доменом — вырезаем только путь+query
+    const path = url.replace(/^https?:\/\/[^/]+\/api\//, '')
+    return api.get(path)
+  },
   create(data) {
     return api.post('lfg-posts/', data)
   },

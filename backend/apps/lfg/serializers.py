@@ -4,9 +4,11 @@ from rest_framework import serializers
 from .models import LFGPost, LFGResponse, LFGChatMessage,ContactReveal
 from .validators import validate_no_profanity
 from datetime import timedelta
+from apps.users.models import Notification
 
-
-
+def user_has_synced_account(user):
+    from apps.profiles.models import GameAccount
+    return GameAccount.objects.filter(user=user, verified=True).exists()
 
 
 class LFGResponseSerializer(serializers.ModelSerializer):
@@ -24,6 +26,10 @@ class LFGResponseSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context['request']
+        if not user_has_synced_account(request.user):
+            raise serializers.ValidationError(
+                "Сначала подключи и синхронизируй игровой аккаунт в профиле"
+            )
         post = attrs['post']
         if LFGResponse.objects.filter(post=post, user=request.user).exists():
             raise serializers.ValidationError("Ты уже откликнулся на эту заявку")
@@ -32,7 +38,7 @@ class LFGResponseSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        validated_data['user'] = self.context['request'].user
+        validated_data["user"] = self.context["request"].user
         response = super().create(validated_data)
 
         post = response.post
@@ -42,14 +48,30 @@ class LFGResponseSerializer(serializers.ModelSerializer):
             defaults={"contact": post.contact, "expires_at": timezone.now() + timedelta(hours=1)},
         )
         if not created:
-            
             reveal.contact = post.contact
             reveal.expires_at = timezone.now() + timedelta(hours=1)
             reveal.save(update_fields=["contact", "expires_at"])
 
         if post.responses.count() >= post.slots_needed:
-            post.status = 'closed'
-            post.save(update_fields=['status'])
+            post.status = "closed"
+            post.save(update_fields=["status"])
+
+        # уведомление автору + XP
+        try:
+            from apps.users.services import notify
+            from apps.users.xp import add_xp, XP_LFG_RESPONSE
+            request_user = self.context["request"].user
+            if post.author_id != request_user.id:
+                notify(
+                    post.author,
+                    kind="lfg_response",
+                    title="Новый отклик",
+                    body=f"{request_user.username} откликнулся на «{post.game}»",
+                    link=f"/lfg/{post.id}",
+                )
+            add_xp(request_user, XP_LFG_RESPONSE, reason="отклик LFG")
+        except Exception:
+            pass
 
         return response
 
@@ -117,8 +139,14 @@ class LFGPostSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data['author'] = self.context['request'].user
-        return super().create(validated_data)
+        validated_data["author"] = self.context["request"].user
+        post = super().create(validated_data)
+        try:
+            from apps.users.xp import add_xp, XP_LFG_POST
+            add_xp(self.context["request"].user, XP_LFG_POST, reason="заявка LFG")
+        except Exception:
+            pass
+        return post
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

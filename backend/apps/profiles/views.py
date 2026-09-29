@@ -191,17 +191,27 @@ class WorldLeaderboardView(APIView):
         game = request.query_params.get("game", "dota2")
 
         if game == "dota2":
-            from .integrations.opendota_client import OpenDotaClient
+            from .integrations.opendota_client import OpenDotaClient, OpenDotaError
+            cached = cache.get("world_leaderboard_dota2")
+            if cached:
+                return Response(cached)
             client = OpenDotaClient()
-            players = client.get_pro_players()[:15]
+            try:
+                players = client.get_pro_players()[:15]
+            except OpenDotaError as e:
+                return Response({"detail": str(e)}, status=503)
+            except Exception:
+                return Response({"detail": "Не удалось загрузить лидерборд Dota 2"}, status=502)
             data = [{
                 "external_id": str(p.get("account_id")),
                 "name": p.get("name") or p.get("personaname"),
                 "avatar": p.get("avatar"),
                 "team": p.get("team_name"),
                 "platform": "opendota",
+                "guest_link": f"/players/guest/dota2/{p.get('account_id')}" if p.get("account_id") else None,
                 "source": "OpenDota — известные про-игроки",
             } for p in players]
+            cache.set("world_leaderboard_dota2", data, timeout=60 * 60)
             return Response(data)
 
         if game == "lol":
@@ -250,44 +260,123 @@ class WorldLeaderboardView(APIView):
 
             cache.set("world_leaderboard_cs2", data, timeout=6 * 60 * 60)
             return Response(data)
+        
+        if game == "valorant":
+            cached = cache.get("world_leaderboard_valorant")
+            if cached:
+                return Response(cached)
+
+            from .integrations.valorant_client import ValorantClient
+            client = ValorantClient()
+            try:
+                players = client.get_leaderboard(region="eu", size=15)
+            except Exception:
+                return Response({"detail": "Не удалось загрузить лидерборд Valorant"}, status=502)
+
+            data = []
+            for p in players:
+                riot_id = f"{p.get('gameName')}#{p.get('tagLine')}"
+                gh_account = GameAccount.objects.filter(platform="valorant", external_id__iexact=riot_id).first()
+                data.append({
+                    "external_id": riot_id,
+                    "name": p.get("gameName", "Игрок"),
+                    "avatar": None,
+                    "subtitle": f"#{p.get('leaderboardRank')}",
+                    "value": f"{p.get('rankedRating', 0)} RR",
+                    "guest_link": None,
+                    "gamehub_user_id": gh_account.user_id if gh_account else None,
+                })
+
+            cache.set("world_leaderboard_valorant", data, timeout=6 * 60 * 60)
+            return Response(data)
 
         return Response([], status=200)
 
 class GuestProfileView(APIView):
-    """GET /api/guest-profile/dota2/{external_id}/ — статистика ЛЮБОГО игрока, зарегистрирован он или нет"""
+    """
+    GET /api/guest-profile/dota2/{account_id}/
+    GET /api/guest-profile/valorant/{Name%23Tag}/
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, game, external_id):
-        if game != "dota2":
-            return Response({"detail": "Гостевой просмотр поддерживается только для Dota 2"}, status=400)
+        game = (game or "").lower()
+        if game in ("opendota", "dota"):
+            game = "dota2"
+        if game == "dota2":
+            return self._dota_guest(external_id)
+        if game == "valorant":
+            return self._valorant_guest(external_id)
+        return Response(
+            {"detail": "Гостевой просмотр поддерживается для dota2 и valorant"},
+            status=400,
+        )
 
+    def _dota_guest(self, external_id):
         from .integrations.opendota_client import OpenDotaClient
-        from .integrations.steam_client import SteamClient
+        from datetime import datetime
 
         client = OpenDotaClient()
         try:
             player = client.get_player(external_id)
             wl = client.get_win_loss(external_id)
         except Exception:
-            return Response({"detail": "Игрок не найден или профиль полностью закрыт"}, status=404)
+            return Response(
+                {"detail": "Игрок не найден или профиль полностью закрыт"},
+                status=404,
+            )
 
         profile_data = player.get("profile", {}) or {}
         is_public = bool(profile_data.get("personaname"))
 
         heroes_data = []
+        hero_names = {}
         try:
             heroes_raw = client.get_heroes(external_id)
             hero_names = client.get_hero_names()
             top = sorted(heroes_raw, key=lambda h: h.get("games", 0), reverse=True)[:5]
             heroes_data = [
-                {"name": hero_names.get(h["hero_id"], "?"), "games": h.get("games", 0),
-                 "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0}
-                for h in top if h.get("games", 0) > 0
+                {
+                    "name": hero_names.get(h["hero_id"], "?"),
+                    "games": h.get("games", 0),
+                    "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0,
+                }
+                for h in top
+                if h.get("games", 0) > 0
             ]
         except Exception:
             pass
 
-        gh_account = GameAccount.objects.filter(platform="opendota", external_id=str(external_id)).select_related("user").first()
+        match_history = []
+        try:
+            if not hero_names:
+                hero_names = client.get_hero_names()
+            recent = client.get_recent_matches(external_id, limit=20)
+            for m in recent:
+                is_radiant = m.get("player_slot", 0) < 128
+                won = (is_radiant and m.get("radiant_win")) or (
+                    not is_radiant and not m.get("radiant_win")
+                )
+                played_at = None
+                if m.get("start_time"):
+                    try:
+                        played_at = datetime.fromtimestamp(m["start_time"]).strftime("%d.%m.%Y")
+                    except (OSError, ValueError, OverflowError):
+                        played_at = None
+                match_history.append({
+                    "won": won,
+                    "title": hero_names.get(m.get("hero_id"), "?"),
+                    "subtitle": f"{m.get('kills', 0)}/{m.get('deaths', 0)}/{m.get('assists', 0)}",
+                    "match_id": m.get("match_id"),
+                    "duration": f"{round(m.get('duration', 0) / 60)} мин" if m.get("duration") else None,
+                    "played_at": played_at,
+                })
+        except Exception:
+            pass
+
+        gh_account = GameAccount.objects.filter(
+            platform="opendota", external_id=str(external_id)
+        ).select_related("user").first()
 
         return Response({
             "is_public": is_public,
@@ -297,56 +386,130 @@ class GuestProfileView(APIView):
             "gamehub_user_id": gh_account.user_id if gh_account else None,
             "wins": wl.get("win", 0),
             "losses": wl.get("lose", 0),
-            "mmr_estimate": player.get("mmr_estimate", {}).get("estimate"),
+            "mmr_estimate": (player.get("mmr_estimate") or {}).get("estimate"),
             "rank_tier": player.get("rank_tier"),
             "top_heroes": heroes_data,
+            "match_history": match_history,
         })
 
-class WorldLeaderboardView(APIView):
-    """GET /api/world-leaderboard/?game=dota2|lol"""
-    permission_classes = [permissions.IsAuthenticated]
+    def _valorant_guest(self, riot_id):
+        from urllib.parse import unquote
+        from collections import Counter
+        from datetime import datetime
+        from .integrations.valorant_client import ValorantClient
 
-    def get(self, request):
-        game = request.query_params.get("game", "dota2")
+        riot_id = unquote(riot_id)
+        if "#" not in riot_id:
+            return Response(
+                {"detail": "Укажи Riot ID в формате Ник#Тег"},
+                status=400,
+            )
+        name, tag = riot_id.split("#", 1)
+        client = ValorantClient()
 
-        if game == "dota2":
-            cached = cache.get("world_leaderboard_dota2")
-            if cached:
-                return Response(cached)
+        try:
+            account = client.get_account(name, tag)
+        except Exception as e:
+            return Response(
+                {"detail": str(e) or "Игрок не найден"},
+                status=404,
+            )
 
-            from .integrations.opendota_client import OpenDotaClient
-            client = OpenDotaClient()
-            try:
-                players = client.get_pro_players()
-            except Exception:
-                return Response({"detail": "Не удалось загрузить лидерборд Dota 2"}, status=502)
+        region = account.get("region") or "eu"
+        mmr, matches = {}, []
+        try:
+            mmr = client.get_mmr(name, tag, region=region) or {}
+        except Exception:
+            pass
+        try:
+            matches = client.get_matches(name, tag, region=region, size=20) or []
+        except Exception:
+            pass
 
-            enriched = []
-            for p in players[:15]:  # только 15, без лишней нагрузки на API
-                account_id = p.get("account_id")
-                if not account_id:
-                    continue
-                mmr = None
+        current = mmr.get("current_data") or {}
+        tier = current.get("currenttierpatched") or "Unranked"
+        rr = current.get("ranking_in_tier") or 0
+
+        agent_counter = Counter()
+        match_history = []
+        wins = losses = 0
+
+        for match in matches[:20]:
+            players = (match.get("players") or {}).get("all_players") or []
+            me = next(
+                (p for p in players if (p.get("name") or "").lower() == name.lower()),
+                None,
+            )
+            if not me:
+                continue
+
+            team_key = (me.get("team") or "").lower()
+            team_won = bool(
+                (match.get("teams") or {}).get(team_key, {}).get("has_won", False)
+            )
+            if team_won:
+                wins += 1
+            else:
+                losses += 1
+
+            agent = me.get("character") or "?"
+            agent_counter[agent] += 1
+            stats = me.get("stats") or {}
+            k = stats.get("kills", 0)
+            d = stats.get("deaths", 0)
+            a = stats.get("assists", 0)
+
+            meta = match.get("metadata") or {}
+            game_start = meta.get("game_start")
+            played_at = None
+            if game_start:
                 try:
-                    full_profile = client.get_player(account_id)
-                    mmr = full_profile.get("mmr_estimate", {}).get("estimate")
-                except Exception:
-                    pass  # у части профилей MMR скрыт — это нормально, просто не показываем цифру
+                    played_at = datetime.fromtimestamp(game_start).strftime("%d.%m.%Y")
+                except (OSError, ValueError, OverflowError):
+                    played_at = None
 
-                enriched.append({
-                    "external_id": str(account_id),
-                    "name": p.get("name") or p.get("personaname") or "Игрок",
-                    "avatar": p.get("avatar"),
-                    "subtitle": p.get("team_name") or "Свободный агент",
-                    "value": f"{mmr} MMR" if mmr else None,
-                    "guest_link": f"/players/guest/dota2/{account_id}",
-                })
+            match_id = meta.get("matchid") or meta.get("match_id")
+            match_history.append({
+                "won": team_won,
+                "title": agent,
+                "subtitle": f"{k}/{d}/{a}",
+                "match_id": match_id,
+                "played_at": played_at,
+                "duration": None,
+            })
 
-            # сортируем тех, у кого MMR известен, наверх; у кого нет — оставляем внизу как есть
-            enriched.sort(key=lambda e: int(e["value"].split()[0]) if e["value"] else -1, reverse=True)
+        top_heroes = [
+            {"name": ag, "games": cnt, "winrate": 0}
+            for ag, cnt in agent_counter.most_common(5)
+        ]
 
-            cache.set("world_leaderboard_dota2", enriched, timeout=6 * 60 * 60)  # кэш на 6 часов
-            return Response(enriched)
+        gh_account = GameAccount.objects.filter(
+            platform="valorant", external_id__iexact=f"{name}#{tag}"
+        ).select_related("user").first()
+
+        avatar = None
+        card = account.get("card")
+        if isinstance(card, dict):
+            avatar = card.get("small") or card.get("large")
+        if not avatar:
+            avatar = account.get("avatar")
+
+        return Response({
+            "is_public": True,
+            "display_name": f"{name}#{tag}",
+            "avatar_url": avatar,
+            "is_gamehub_user": bool(gh_account),
+            "gamehub_user_id": gh_account.user_id if gh_account else None,
+            "wins": wins,
+            "losses": losses,
+            "mmr_estimate": None,
+            "tier": tier,
+            "rr": rr,
+            "rank_tier": None,
+            "top_heroes": top_heroes,
+            "match_history": match_history,
+        })
+
 
 class MatchParticipantsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -356,122 +519,36 @@ class MatchParticipantsView(APIView):
             return self._dota_participants(match_id)
         if game == "valorant":
             return self._valorant_participants(match_id)
-        if game =="lol":
-            return self._lol_participants(match_id)
         return Response({"detail": "Игра не поддерживается"}, status=400)
 
-    def _lol_participants(self, match_id):
-        from .integrations.riot_client import RiotClient
-        client = RiotClient()
-        try:
-            match = client.get_match_details(match_id)
-            timeline = client.get_match_timeline(match_id)
-        except Exception:
-            return Response({"detail": "Матч не найден"}, status=404)
-
-        participant_id_to_name = {
-            p["participantId"]: p["riotIdGameName"] for p in match["info"]["participants"]
-        }
-
-        kill_events = []
-        for frame in timeline.get("info", {}).get("frames", []):
-            for event in frame.get("events", []):
-                if event.get("type") == "CHAMPION_KILL":
-                    kill_events.append({
-                        "killer": participant_id_to_name.get(event.get("killerId"), "Environment"),
-                        "victim": participant_id_to_name.get(event.get("victimId"), "?"),
-                        "timestamp_ms": event.get("timestamp"),
-                    })
-
-        participants = []
-        for p in match["info"]["participants"]:
-            gh_account = GameAccount.objects.filter(
-                platform="lol", external_id__istartswith=p.get("riotIdGameName", "")
-            ).select_related("user").first()
-            participants.append({
-                "name": p.get("riotIdGameName"),
-                "champion": p.get("championName"),
-                "kda": f"{p.get('kills',0)}/{p.get('deaths',0)}/{p.get('assists',0)}",
-                "team": p.get("teamId"),
-                "won": p.get("win"),
-                "is_gamehub_user": bool(gh_account),
-                "gamehub_user_id": gh_account.user_id if gh_account else None,
-            })
-
-        return Response({"participants": participants, "kill_timeline": kill_events})
-
-    def _valorant_participants(self, match_id):
-        from .integrations.valorant_client import ValorantClient
-        client = ValorantClient()
-        try:
-            detail = client.get_match_details(match_id)
-        except Exception:
-            return Response({"detail": "Матч не найден"}, status=404)
-
-        players = detail.get("players", {}).get("all_players", [])
-        puuid_to_name = {p.get("puuid"): f"{p.get('name')}#{p.get('tag')}" for p in players}
-
-        participants = []
-        for p in players:
-            riot_id = f"{p.get('name')}#{p.get('tag')}"
-            gh_account = GameAccount.objects.filter(platform="valorant", external_id__iexact=riot_id).select_related("user").first()
-            stats = p.get("stats", {})
-            participants.append({
-                "riot_id": riot_id,
-                "display_name": p.get("name"),
-                "avatar": p.get("assets", {}).get("card", {}).get("small"),
-                "agent": p.get("character"),
-                "team": p.get("team"),
-                "kda": f"{stats.get('kills',0)}/{stats.get('deaths',0)}/{stats.get('assists',0)}",
-                "is_gamehub_user": bool(gh_account),
-                "gamehub_user_id": gh_account.user_id if gh_account else None,
-            })
-
-        # раунды с покилловой разбивкой — структура HenrikDev может отличаться версией API,
-        # если поля не совпадут, пришли сырой detail.get("rounds") и я поправлю маппинг
-        rounds_data = []
-        for i, rnd in enumerate(detail.get("rounds", [])):
-            kills = []
-            for player_stat in rnd.get("player_stats", []):
-                for kill_event in player_stat.get("kill_events", []) or []:
-                    killer = puuid_to_name.get(kill_event.get("killer_puuid"), "?")
-                    victim = puuid_to_name.get(kill_event.get("victim_puuid"), "?")
-                    kills.append({
-                        "killer": killer, "victim": victim,
-                        "weapon": kill_event.get("damage_weapon_name"),
-                        "time_in_round": kill_event.get("kill_time_in_round"),
-                    })
-            rounds_data.append({"round_number": i + 1, "winning_team": rnd.get("end_result"), "kills": kills})
-
-        teams = detail.get("teams", {})
-        return Response({
-            "participants": participants,
-            "map": detail.get("metadata", {}).get("map"),
-            "red_won": teams.get("red", {}).get("has_won"),
-            "blue_won": teams.get("blue", {}).get("has_won"),
-            "rounds": rounds_data,
-        })
-
     def _dota_participants(self, match_id):
-        from .integrations.opendota_client import OpenDotaClient
+        from .integrations.opendota_client import OpenDotaClient, OpenDotaError
         from .integrations.steam_client import SteamClient
 
         client = OpenDotaClient()
         try:
             detail = client.get_match_details(match_id)
+        except OpenDotaError as e:
+            return Response({"detail": str(e)}, status=503)
         except Exception:
             return Response({"detail": "Матч не найден"}, status=404)
 
-        hero_names = client.get_hero_names()
+        try:
+            hero_names = client.get_hero_names()
+        except Exception:
+            hero_names = {}
+
         try:
             item_names = client.get_item_names()
         except Exception:
             item_names = {}
 
-        players_raw = detail.get("players", [])
-
-        
-        steam_ids = [str(p["account_id"] + 76561197960265728) for p in players_raw if p.get("account_id")]
+        players_raw = detail.get("players", []) or []
+        steam_ids = [
+            str(p["account_id"] + 76561197960265728)
+            for p in players_raw
+            if p.get("account_id")
+        ]
         avatars_by_steamid = {}
         if steam_ids:
             try:
@@ -497,7 +574,7 @@ class MatchParticipantsView(APIView):
             elif is_public:
                 display_name = p.get("personaname")
             else:
-                display_name = None  
+                display_name = None
 
             avatar = None
             if account_id:
@@ -506,14 +583,19 @@ class MatchParticipantsView(APIView):
             items = []
             for slot in range(6):
                 item_id = p.get(f"item_{slot}")
-                if item_id:
-                    items.append(item_names.get(item_id, f"Предмет #{item_id}"))
+                if item_id and item_id in item_names:
+                    items.append(item_names[item_id])
+
+            neutral = None
+            nid = p.get("item_neutral")
+            if nid and nid in item_names:
+                neutral = item_names[nid]
 
             participants.append({
                 "account_id": account_id,
                 "display_name": display_name,
                 "avatar": avatar,
-                "hero": hero_names.get(p.get("hero_id"), "?"),
+                "hero": hero_names.get(p.get("hero_id"), f"Hero {p.get('hero_id')}"),
                 "level": p.get("level"),
                 "kda": f"{p.get('kills', 0)}/{p.get('deaths', 0)}/{p.get('assists', 0)}",
                 "net_worth": p.get("net_worth"),
@@ -524,7 +606,11 @@ class MatchParticipantsView(APIView):
                 "denies": p.get("denies"),
                 "gpm": p.get("gold_per_min"),
                 "xpm": p.get("xp_per_min"),
-                "items": items,
+                "items": items or [],
+                "neutral_item": neutral,
+                "aghanims_scepter": bool(p.get("aghanims_scepter")),
+                "aghanims_shard": bool(p.get("aghanims_shard")),
+                "moonshard": bool(p.get("moonshard")),
                 "is_radiant": p.get("player_slot", 0) < 128,
                 "is_gamehub_user": bool(gh_account),
                 "gamehub_user_id": gh_account.user_id if gh_account else None,
@@ -536,3 +622,149 @@ class MatchParticipantsView(APIView):
             "radiant_win": detail.get("radiant_win"),
             "duration": detail.get("duration"),
         })
+
+    def _valorant_participants(self, match_id):
+        from .integrations.valorant_client import ValorantClient
+        client = ValorantClient()
+        try:
+            detail = client.get_match_details(match_id)
+        except Exception:
+            return Response({"detail": "Матч не найден"}, status=404)
+
+        players = detail.get("players", {}).get("all_players", []) or []
+        puuid_to_name = {p.get("puuid"): f"{p.get('name')}#{p.get('tag')}" for p in players}
+        puuid_to_agent = {p.get("puuid"): p.get("character") for p in players}
+        puuid_to_avatar = {
+            p.get("puuid"): (p.get("assets") or {}).get("card", {}).get("small")
+            for p in players
+        }
+        puuid_to_team = {p.get("puuid"): p.get("team") for p in players}
+
+        participants = []
+        for p in players:
+            riot_id = f"{p.get('name')}#{p.get('tag')}"
+            gh_account = GameAccount.objects.filter(
+                platform="valorant", external_id__iexact=riot_id
+            ).select_related("user").first()
+            stats = p.get("stats") or {}
+            participants.append({
+                "riot_id": riot_id,
+                "display_name": p.get("name"),
+                "avatar": (p.get("assets") or {}).get("card", {}).get("small"),
+                "agent": p.get("character"),
+                "team": p.get("team"),
+                "kda": f"{stats.get('kills', 0)}/{stats.get('deaths', 0)}/{stats.get('assists', 0)}",
+                "is_gamehub_user": bool(gh_account),
+                "gamehub_user_id": gh_account.user_id if gh_account else None,
+            })
+
+        rounds_data = []
+        for i, rnd in enumerate(detail.get("rounds", []) or []):
+            # --- плант ---
+            plant = rnd.get("plant_events") or {}
+            if isinstance(plant, list):
+                plant = plant[0] if plant else {}
+            plant_time = plant.get("plant_time_in_round")
+            plant_site = plant.get("plant_site")
+            planter_info = plant.get("planted_by") or {}
+            planter_puuid = planter_info.get("puuid") if isinstance(planter_info, dict) else None
+
+            # кто атакует в этом раунде
+            attacking_team = None
+            if planter_puuid and planter_puuid in puuid_to_team:
+                attacking_team = puuid_to_team[planter_puuid]
+            if not attacking_team:
+                # до смены сторон (раунды 0–11) обычно Red атакует
+                attacking_team = "Red" if i < 12 else "Blue"
+            defending_team = "Blue" if attacking_team == "Red" else "Red"
+
+            kills = []
+            for player_stat in rnd.get("player_stats", []) or []:
+                for kill_event in player_stat.get("kill_events", []) or []:
+                    killer_puuid = kill_event.get("killer_puuid")
+                    victim_puuid = kill_event.get("victim_puuid")
+                    killer_team = puuid_to_team.get(killer_puuid)
+                    side = "attack" if killer_team == attacking_team else "defense"
+
+                    kills.append({
+                        "killer": puuid_to_name.get(killer_puuid, "?"),
+                        "victim": puuid_to_name.get(victim_puuid, "?"),
+                        "killer_agent": puuid_to_agent.get(killer_puuid, "?"),
+                        "victim_agent": puuid_to_agent.get(victim_puuid, "?"),
+                        "killer_avatar": puuid_to_avatar.get(killer_puuid),
+                        "victim_avatar": puuid_to_avatar.get(victim_puuid),
+                        "weapon": kill_event.get("damage_weapon_name"),
+                        "headshot": kill_event.get("kill_type") == "headshot",
+                        "time_in_round": kill_event.get("kill_time_in_round"),
+                        "side": side,
+                        "killer_team": killer_team,
+                    })
+
+            kills.sort(key=lambda k: k.get("time_in_round") or 0)
+
+            # таймлайн: киллы + плант
+            events = [{**k, "type": "kill"} for k in kills]
+            if plant_time is not None:
+                events.append({
+                    "type": "plant",
+                    "time_in_round": plant_time,
+                    "site": plant_site or "?",
+                    "planter": puuid_to_name.get(planter_puuid, "?") if planter_puuid else "?",
+                    "side": "attack",
+                })
+            events.sort(key=lambda e: e.get("time_in_round") or 0)
+
+            winning = rnd.get("winning_team") or rnd.get("end_result")
+            rounds_data.append({
+                "round_number": i + 1,
+                "winning_team": winning,
+                "attacking_team": attacking_team,
+                "defending_team": defending_team,
+                "plant_time": plant_time,
+                "plant_site": plant_site,
+                "kills": kills,
+                "events": events,
+            })
+
+        teams = detail.get("teams") or {}
+        red_team = teams.get("red") or {}
+        blue_team = teams.get("blue") or {}
+
+        return Response({
+            "participants": participants,
+            "map": (detail.get("metadata") or {}).get("map"),
+            "red_won": red_team.get("has_won"),
+            "blue_won": blue_team.get("has_won"),
+            "red_score": red_team.get("rounds_won", 0),
+            "blue_score": blue_team.get("rounds_won", 0),
+            "rounds": rounds_data,
+        })
+class RecentMatchesFeedView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        platform = request.query_params.get("platform")
+        accounts = GameAccount.objects.filter(user=request.user)
+        if platform:
+            accounts = accounts.filter(platform=platform)
+
+        all_matches = []
+        for acc in accounts:
+            history = (acc.extra_stats or {}).get("match_history", [])
+            for m in history[:8]:
+                all_matches.append({**m, "game_label": acc.game_label or acc.platform, "platform": acc.platform})
+
+        all_matches.sort(key=lambda m: m.get("played_at") or "", reverse=True)
+
+        available_platforms = list(
+            GameAccount.objects.filter(user=request.user)
+            .exclude(extra_stats__isnull=True)
+            .values_list("platform", "game_label")
+            .distinct()
+        )
+
+        return Response({
+            "matches": all_matches[:8],
+            "available_platforms": [{"value": p, "label": l or p} for p, l in available_platforms],
+        })
+  

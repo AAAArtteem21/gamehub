@@ -60,6 +60,18 @@ def _compute_match_verdict(my_slot, won):
         return {"label": "Слабая игра", "tone": "bad"}
     return {"label": "зачем тролишь?", "tone": "terrible"}
 
+def _compute_valorant_verdict(kills, deaths, assists, acs):
+    kda = (kills + assists) / max(deaths, 1)
+    if acs >= 280 and kda >= 2:
+        return {"label": "Огромный импакт", "tone": "great"}
+    if acs >= 220:
+        return {"label": "Хорошая игра", "tone": "good"}
+    if acs >= 150:
+        return {"label": "Нормально", "tone": "neutral"}
+    if acs >= 100:
+        return {"label": "Слабая игра", "tone": "bad"}
+    return {"label": "Ужасная игра", "tone": "terrible"}
+
 class SyncError(Exception):
     pass
 
@@ -105,169 +117,413 @@ class ProfileSyncService:
         self.account.last_synced_at = timezone.now()
         self.account.save(update_fields=["verified", "last_synced_at"])
 
-
-    def _sync_fortnite(self):
-        from .integrations.fortnite_client import FortniteClient
-        client = FortniteClient()
-        profile = client.get_profile(self.account.external_id)
-
-        segments = profile.get("segments", [])
-        overview = next((s for s in segments if s.get("type") == "overview"), segments[0] if segments else {})
-        stats = overview.get("stats", {})
-
-        kills = stats.get("kills", {}).get("value", 0)
-        wins = stats.get("wins", {}).get("value", 0)
-        matches = stats.get("matchesPlayed", {}).get("value", 0)
-        kd = stats.get("kd", {}).get("value", 0)
-        top1_pct = stats.get("winRatio", {}).get("value", 0)
-        avg_survival = stats.get("scorePerMatch", {}).get("value", "—")
-
-        self.account.extra_stats = {
-            "matches": matches, "wins": wins, "kills": kills, "kd": kd,
-            "winrate": top1_pct, "avg_score": avg_survival,
-        }
-        self.account.game_label = "Fortnite"
-        self.account.save(update_fields=["extra_stats", "game_label"])
-
     def _sync_lol(self):
-        from .integrations.riot_client import RiotClient
-        client = RiotClient()
-        game_name, tag_line = self.account.external_id.split("#")
-        account = client.get_account_by_riot_id(game_name, tag_line)
-        puuid = account["puuid"]
-        summoner = client.get_summoner_by_puuid(puuid)
-        ranked = client.get_ranked_stats(summoner["id"])
-        solo_queue = next((r for r in ranked if r.get("queueType") == "RANKED_SOLO_5x5"), None)
+        from .integrations.riot_client import RiotClient, RiotError
+        from datetime import datetime
+        from collections import Counter
 
-        match_ids = client.get_match_history(puuid, count=10)
-        match_history = []
-        for match_id in match_ids[:10]:
+        raw = (self.account.external_id or "").strip()
+        if "#" not in raw:
+            raise SyncError("Riot ID в формате Ник#Тег")
+        name, tag = raw.split("#", 1)
+        platform = (self.account.extra_stats or {}).get("riot_platform") or "euw1"
+
+        client = RiotClient(platform=platform)
+        try:
+            acc = client.get_account_by_riot_id(name, tag)
+            puuid = acc["puuid"]
+            leagues = client.get_league_by_puuid(puuid) or []
+            match_ids = client.get_match_ids(puuid, count=20) or []
+        except RiotError as e:
+            raise SyncError(str(e))
+
+        queues = {}
+        for entry in leagues:
+            qt = entry.get("queueType") or "OTHER"
+            queues[qt] = {
+                "tier": entry.get("tier"),
+                "rank": entry.get("rank"),
+                "lp": entry.get("leaguePoints"),
+                "wins": int(entry.get("wins") or 0),
+                "losses": int(entry.get("losses") or 0),
+            }
+
+        solo = queues.get("RANKED_SOLO_5x5") or {}
+        flex = queues.get("RANKED_FLEX_SR") or {}
+        wins = solo.get("wins", 0)
+        losses = solo.get("losses", 0)
+        total = wins + losses
+        tier_str = None
+        if solo.get("tier"):
+            tier_str = f"{solo['tier']} {solo.get('rank') or ''}".strip()
+
+        champ_counter = Counter()
+        k_sum = d_sum = a_sum = n = 0
+        history = []
+
+        for mid in match_ids[:20]:
             try:
-                match = client.get_match_details(match_id)
-                p = next(x for x in match["info"]["participants"] if x["puuid"] == puuid)
-                cs = p.get("totalMinionsKilled", 0) + p.get("neutralMinionsKilled", 0)
-                match_history.append({
-                    "won": p["win"], "title": p["championName"],
-                    "subtitle": f"{p['kills']}/{p['deaths']}/{p['assists']}",
-                    "duration": f"{round(match['info'].get('gameDuration', 0) / 60)} мин",
-                    "played_at": datetime.fromtimestamp(match["info"].get("gameCreation", 0) / 1000).strftime("%d.%m.%Y") if match["info"].get("gameCreation") else None,
-                    "details": [
-                        {"label": "CS", "value": cs},
-                        {"label": "Золото", "value": p.get("goldEarned", "—")},
-                        {"label": "Урон", "value": p.get("totalDamageDealtToChampions", "—")},
-                        {"label": "Роль", "value": p.get("teamPosition") or "Неизвестна"},
-                    ],
-                })
+                detail = client.get_match(mid)
             except Exception:
                 continue
+            info = detail.get("info") or {}
+            me = next((p for p in (info.get("participants") or []) if p.get("puuid") == puuid), None)
+            if not me:
+                continue
 
-        wins = solo_queue.get("wins", 0) if solo_queue else 0
-        losses = solo_queue.get("losses", 0) if solo_queue else 0
-        total = wins + losses
-        winrate = round(wins / total * 100, 1) if total else 0
+            champ = me.get("championName") or "?"
+            champ_counter[champ] += 1
+            k, d, a = int(me.get("kills") or 0), int(me.get("deaths") or 0), int(me.get("assists") or 0)
+            k_sum += k
+            d_sum += d
+            a_sum += a
+            n += 1
+
+            cs = int(me.get("totalMinionsKilled") or 0) + int(me.get("neutralMinionsKilled") or 0)
+            dmg = int(me.get("totalDamageDealtToChampions") or 0)
+            gold = int(me.get("goldEarned") or 0)
+            vision = int(me.get("visionScore") or 0)
+            duration_sec = int(info.get("gameDuration") or 0)
+            queue_id = info.get("queueId")
+            queue_label = {
+                420: "Solo/Duo",
+                440: "Flex",
+                450: "ARAM",
+                400: "Normal",
+                430: "Blind",
+            }.get(queue_id, f"Q{queue_id}")
+
+            ts = info.get("gameStartTimestamp")
+            played_at = None
+            if ts:
+                try:
+                    played_at = datetime.utcfromtimestamp(ts / 1000).strftime("%d.%m.%Y %H:%M")
+                except Exception:
+                    pass
+
+            history.append({
+                "won": bool(me.get("win")),
+                "title": champ,
+                "subtitle": f"{k}/{d}/{a} · {queue_label}",
+                "match_id": mid,
+                "played_at": played_at,
+                "duration": f"{duration_sec // 60} мин" if duration_sec else None,
+                "platform": "lol",
+                "details": [
+                    {"label": "Режим", "value": queue_label},
+                    {"label": "CS", "value": cs},
+                    {"label": "Урон", "value": f"{dmg:,}".replace(",", " ")},
+                    {"label": "Золото", "value": f"{gold:,}".replace(",", " ")},
+                    {"label": "Обзор", "value": vision},
+                    {"label": "Уровень", "value": me.get("champLevel") or "—"},
+                ],
+            })
+
+        avg_kda = None
+        if n:
+            ratio = round((k_sum + a_sum) / max(d_sum, 1), 2)
+            avg_kda = f"{round(k_sum/n,1)}/{round(d_sum/n,1)}/{round(a_sum/n,1)} ({ratio})"
+
+        top_champs = [
+            {"name": name_, "games": cnt}
+            for name_, cnt in champ_counter.most_common(5)
+        ]
 
         self.account.extra_stats = {
-            "tier": solo_queue.get("tier") if solo_queue else None,
-            "rank": solo_queue.get("rank") if solo_queue else None,
-            "lp": solo_queue.get("leaguePoints") if solo_queue else None,
-            "wins": wins, "losses": losses, "matches": total, "winrate": winrate,
-            "match_history": match_history,
+            "matches": total,
+            "wins": wins,
+            "losses": losses,
+            "winrate": round(wins / total * 100, 1) if total else 0,
+            "tier": tier_str or "Unranked",
+            "lp": solo.get("lp"),
+            "flex_tier": (
+                f"{flex['tier']} {flex.get('rank') or ''}".strip()
+                if flex.get("tier") else None
+            ),
+            "flex_lp": flex.get("lp"),
+            "flex_wins": flex.get("wins"),
+            "flex_losses": flex.get("losses"),
+            "riot_platform": platform,
+            "puuid": puuid,
+            "avg_kda": avg_kda,
+            "main_agent": top_champs[0]["name"] if top_champs else None,
+            "top_champions": top_champs,
+            "queues": queues,
+            "match_history": history,
+            "recent_form": ["W" if m["won"] else "L" for m in history[:10]],
         }
         self.account.game_label = "League of Legends"
-        self.account.nickname = f"{game_name}#{tag_line}"
-        self.account.save(update_fields=["extra_stats", "game_label", "nickname"])
+        self.account.nickname = f"{acc.get('gameName')}#{acc.get('tagLine')}"
+        self.account.skill_rating = solo.get("lp")
+        self.account.save(update_fields=["extra_stats", "game_label", "nickname", "skill_rating"])
 
     def _sync_valorant(self):
         from .integrations.valorant_client import ValorantClient
         client = ValorantClient()
-        name, tag = self.account.external_id.split("#")
-        account = client.get_account(name, tag)
-        region = account.get("region", "eu")
-        mmr = client.get_mmr(name, tag, region=region)
-        matches = client.get_matches(name, tag, region=region, size=10)
 
-        current_tier = mmr.get("current_data", {}).get("currenttierpatched", "Unranked")
-        rr = mmr.get("current_data", {}).get("ranking_in_tier", 0)
+        if "#" not in self.account.external_id:
+            raise SyncError("Укажи Riot ID в формате Ник#Тег")
 
-        rr_by_match = {}
+        name, tag = self.account.external_id.split("#", 1)
+
         try:
-            history = client.get_mmr_history(name, tag, region=region)
-            for h in history:
-                match_id = h.get("match_id")
-                if match_id:
-                    rr_by_match[match_id] = h.get("mmr_change_to_last_game")
+            account = client.get_account(name, tag)
+        except ValueError as e:
+            raise SyncError(str(e))
+
+        region = account.get("region") or "eu"
+
+        try:
+            mmr = client.get_mmr(name, tag, region=region)
         except Exception:
-            pass  
+            mmr = {}
+
+        try:
+            matches = client.get_matches(name, tag, region=region, size=40)
+        except Exception:
+            matches = []
+
+        current_data = mmr.get("current_data") or {}
+        current_tier = current_data.get("currenttierpatched", "Unranked")
+        rr = current_data.get("ranking_in_tier", 0)
 
         match_history, agent_counter = [], {}
-        for match in matches[:10]:
-            players = match.get("players", {}).get("all_players", [])
-            me = next((p for p in players if p["name"].lower() == name.lower()), None)
+        for match in matches[:40]:
+            players = (match.get("players") or {}).get("all_players") or []
+            me = next((p for p in players if p.get("name", "").lower() == name.lower()), None)
             if not me:
                 continue
 
-            team_won = match.get("teams", {}).get(me["team"].lower(), {}).get("has_won", False)
+            team_key = (me.get("team") or "").lower()
+            team_won = (match.get("teams") or {}).get(team_key, {}).get("has_won", False)
             agent = me.get("character", "?")
             agent_counter[agent] = agent_counter.get(agent, 0) + 1
-            stats = me.get("stats", {})
-            map_name = match.get("metadata", {}).get("map", "?")
-            match_id = match.get("metadata", {}).get("matchid")
-            rounds_played = match.get("metadata", {}).get("rounds_played") or 1
-            combat_score = stats.get("score", 0)
-            acs = round(combat_score / rounds_played)
 
-            details = [
-                {"label": "Карта", "value": map_name},
-                {"label": "Combat Score (ACS)", "value": acs},
-                {"label": "Хедшоты", "value": stats.get("headshots", "—")},
-                {"label": "Бодишоты", "value": stats.get("bodyshots", "—")},
-            ]
-            rr_change = rr_by_match.get(match_id)
-            if rr_change is not None:
-                details.append({"label": "RR", "value": f"{'+' if rr_change >= 0 else ''}{rr_change}"})
+            stats = me.get("stats") or {}
+            meta = match.get("metadata") or {}
+            map_name = meta.get("map", "?")
+            match_id = meta.get("matchid")
+            rounds_played = meta.get("rounds_played") or 1
+            acs = round(stats.get("score", 0) / max(rounds_played, 1))
+            kills = stats.get("kills", 0)
+            deaths = stats.get("deaths", 0)
+            assists = stats.get("assists", 0)
+
+            game_start = meta.get("game_start")
+            played_at = None
+            if game_start:
+                # Henrik иногда отдаёт секунды, иногда миллисекунды
+                ts = game_start / 1000 if game_start > 10_000_000_000 else game_start
+                try:
+                    played_at = datetime.fromtimestamp(ts).strftime("%d.%m.%Y")
+                except (OSError, ValueError, OverflowError):
+                    played_at = None
+
+            game_length = meta.get("game_length")
+            duration = f"{round(game_length / 60)} мин" if game_length else None
 
             match_history.append({
-                "won": team_won, "title": agent,
-                "subtitle": f"{stats.get('kills', 0)}/{stats.get('deaths', 0)}/{stats.get('assists', 0)}",
-                "duration": None,
-                "right_label": f"{'+' if rr_change is not None and rr_change >= 0 else ''}{rr_change} RR" if rr_change is not None else None,
-                "details": details,
+                "won": team_won,
+                "title": agent,
+                "subtitle": f"{kills}/{deaths}/{assists}",
+                "duration": duration,
+                "match_id": match_id,
+                "played_at": played_at,
+                "verdict": _compute_valorant_verdict(kills, deaths, assists, acs),
+                "solo": None,
+                "details": [
+                    {"label": "Карта", "value": map_name},
+                    {"label": "Combat Score (ACS)", "value": acs},
+                    {"label": "Хедшоты", "value": stats.get("headshots", "—")},
+                ],
             })
 
         main_agent = max(agent_counter, key=agent_counter.get) if agent_counter else None
-        wins = sum(1 for f in match_history if f["won"])
+        wins = sum(1 for m in match_history if m["won"])
         winrate = round(wins / len(match_history) * 100, 1) if match_history else 0
 
         self.account.extra_stats = {
-            "matches": len(match_history), "wins": wins, "winrate": winrate,
-            "tier": current_tier, "rr": rr, "main_agent": main_agent,
+            "matches": len(match_history),
+            "wins": wins,
+            "winrate": winrate,
+            "tier": current_tier,
+            "rr": rr,
+            "main_agent": main_agent,
             "match_history": match_history,
         }
         self.account.game_label = "Valorant"
         self.account.nickname = f"{name}#{tag}"
         self.account.save(update_fields=["extra_stats", "game_label", "nickname"])
 
-    def _sync_pubg(self):
-        from .integrations.pubg_client import PubgClient
-        client = PubgClient()
+    def _sync_fortnite(self):
+        from .integrations.fortnite_client import FortniteClient, FortniteError
 
-        profile = client.get_profile("steam", self.account.external_id)
-        segments = profile.get("segments", [])
-        overview = next((s for s in segments if s.get("type") == "overview"), segments[0] if segments else {})
-        stats = overview.get("stats", {})
+        name = (self.account.external_id or "").strip()
+        if not name:
+            raise SyncError("Укажи Epic display name")
 
-        kills = stats.get("kills", {}).get("value", 0)
-        wins = stats.get("wins", {}).get("value", 0)
-        matches = stats.get("matchesPlayed", {}).get("value", 0)
-        kd = stats.get("kd", {}).get("value", 0)
-        winrate = round(wins / max(matches, 1) * 100, 1)
+        client = FortniteClient()
+
+        def pack_window(data: dict) -> dict:
+            account = data.get("account") or {}
+            bp = data.get("battlePass") or {}
+            stats_all = ((data.get("stats") or {}).get("all") or {})
+            overall = stats_all.get("overall") or {}
+
+            def pack_mode(m):
+                if not m:
+                    return None
+                wins = int(m.get("wins") or 0)
+                matches = int(m.get("matches") or 0)
+                return {
+                    "wins": wins,
+                    "matches": matches,
+                    "kills": int(m.get("kills") or 0),
+                    "deaths": int(m.get("deaths") or 0),
+                    "kd": m.get("kd"),
+                    "winrate": m.get("winRate") if m.get("winRate") is not None else (
+                        round(wins / matches * 100, 1) if matches else 0
+                    ),
+                    "top3": m.get("top3"),
+                    "top5": m.get("top5"),
+                    "top6": m.get("top6"),
+                    "top10": m.get("top10"),
+                    "top12": m.get("top12"),
+                    "top25": m.get("top25"),
+                    "score": m.get("score"),
+                    "score_per_match": m.get("scorePerMatch"),
+                    "kills_per_match": m.get("killsPerMatch"),
+                    "minutes": m.get("minutesPlayed"),
+                    "players_outlived": m.get("playersOutlived"),
+                }
+
+            modes = {}
+            for key in ("solo", "duo", "squad", "ltm"):
+                p = pack_mode(stats_all.get(key))
+                if p and p.get("matches"):
+                    modes[key] = p
+
+            o = pack_mode(overall) or {}
+            return {
+                "account_id": account.get("id"),
+                "name": account.get("name") or name,
+                "bp_level": bp.get("level"),
+                "bp_progress": bp.get("progress"),
+                "overall": o,
+                "modes": modes,
+                "input_pc": pack_mode(
+                    (((data.get("stats") or {}).get("keyboardMouse") or {}).get("overall"))
+                ),
+                "input_gamepad": pack_mode(
+                    (((data.get("stats") or {}).get("gamepad") or {}).get("overall"))
+                ),
+            }
+
+        try:
+            life_raw = client.get_br_stats(name, "lifetime")
+            try:
+                season_raw = client.get_br_stats(name, "season")
+            except FortniteError:
+                season_raw = {}
+        except FortniteError as e:
+            raise SyncError(str(e))
+
+        lifetime = pack_window(life_raw)
+        season = pack_window(season_raw) if season_raw else None
+        o = lifetime.get("overall") or {}
 
         self.account.extra_stats = {
-            "matches": matches, "wins": wins, "kills": kills,
-            "kd": kd, "winrate": winrate,
+            # совместимость со старой карточкой
+            "matches": o.get("matches", 0),
+            "wins": o.get("wins", 0),
+            "losses": max((o.get("matches") or 0) - (o.get("wins") or 0), 0),
+            "winrate": o.get("winrate", 0),
+            "kills": o.get("kills", 0),
+            "deaths": o.get("deaths", 0),
+            "kd": o.get("kd", 0),
+            "bp_level": lifetime.get("bp_level"),
+            "bp_progress": lifetime.get("bp_progress"),
+            "modes": lifetime.get("modes") or {},
+            # окна для UI
+            "windows": {
+                "lifetime": lifetime,
+                "season": season,
+            },
+            "default_window": "season" if season and (season.get("overall") or {}).get("matches") else "lifetime",
+            # PR/earnings — fortnite-api.com не отдаёт
+            "pr": None,
+            "earnings": None,
+            "match_history": [],
+        }
+        self.account.game_label = "Fortnite"
+        self.account.nickname = lifetime.get("name") or name
+        self.account.save(update_fields=["extra_stats", "game_label", "nickname"])
+
+    def _sync_pubg(self):
+        from .integrations.pubg_client import PubgClient, PubgError
+        import requests
+        from django.conf import settings
+
+        steam_id = (self.account.external_id or "").strip()
+        if not steam_id.isdigit():
+            raise SyncError("Для PUBG укажи SteamID64")
+
+        client = PubgClient()
+        try:
+            minutes = client.get_playtime_minutes(steam_id)
+            summary = client.get_player_summary(steam_id)
+        except PubgError as e:
+            raise SyncError(str(e))
+
+        # playtime_2weeks из owned games
+        minutes_2w = 0
+        try:
+            url = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
+            r = requests.get(
+                url,
+                params={
+                    "key": settings.STEAM_API_KEY,
+                    "steamid": steam_id,
+                    "include_appinfo": 1,
+                    "include_played_free_games": 1,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            for g in r.json().get("response", {}).get("games") or []:
+                if g.get("appid") == 578080:
+                    minutes_2w = int(g.get("playtime_2weeks") or 0)
+                    break
+        except Exception:
+            pass
+
+        hours = round(minutes / 60, 1)
+        hours_2w = round(minutes_2w / 60, 1)
+
+        self.account.extra_stats = {
+            "matches": 0,
+            "wins": 0,
+            "losses": 0,
+            "winrate": 0,
+            "hours_played": hours,
+            "hours_2weeks": hours_2w,
+            "minutes_forever": minutes,
+            "steam_avatar": summary.get("avatarfull") or summary.get("avatarmedium"),
+            "steam_country": summary.get("loccountrycode"),
+            "steam_status": summary.get("personastate"),  # 0 offline … 1 online
+            "source": "steam_playtime",
+            "note": "Полная BR-стата (K/D, wins) — после ключа developer.pubg.com",
+            "match_history": [],
         }
         self.account.game_label = "PUBG"
-        self.account.save(update_fields=["extra_stats", "game_label"])
+        self.account.nickname = summary.get("personaname") or steam_id
+        if summary.get("avatarfull"):
+            self.account.avatar = summary.get("avatarfull")
+            self.account.save(
+                update_fields=["extra_stats", "game_label", "nickname", "avatar"]
+            )
+        else:
+            self.account.save(update_fields=["extra_stats", "game_label", "nickname"])
 
 
     def _sync_steam(self):
@@ -371,16 +627,7 @@ class ProfileSyncService:
             item_names = client.get_item_names()
         except Exception:
             pass
-        recent_matches = client.get_recent_matches(self.account.external_id, limit=6)
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(client.get_match_details, m["match_id"]): m["match_id"] for m in recent_matches}
-            for future in as_completed(futures, timeout=25):  # жёсткий потолок ожидания на всю группу
-                match_id = futures[future]
-                try:
-                    details_by_match[match_id] = future.result(timeout=8)  # на каждый отдельный запрос — до 8 сек
-                except Exception:
-                    details_by_match[match_id] = None
+        recent_matches = client.get_recent_matches(self.account.external_id, limit=30)
 
         wins = wl.get("win", 0)
         losses = wl.get("lose", 0)
@@ -493,58 +740,258 @@ class ProfileSyncService:
 
 
     def _sync_faceit(self):
-        client = FaceitClient()
-        player = client.get_player_by_nickname(self.account.external_id)
-        stats = client.get_player_stats(player["player_id"])
-        matches = client.get_recent_matches(player["player_id"], limit=10)
+        from datetime import datetime
+        from .integrations.faceit_client import FaceitClient, FaceitError
 
-        lifetime = stats.get("lifetime", {})
-        match_count = int(lifetime.get("Matches", 0))
-        wins = int(lifetime.get("Wins", 0))
-        winrate = float(lifetime.get("Win Rate %", 0))
-        avg_kd = float(lifetime.get("Average K/D Ratio", 0))
-        avg_hs = float(lifetime.get("Average Headshots %", 0))
-        elo = player.get("games", {}).get("cs2", {}).get("faceit_elo")
-        skill_level = player.get("games", {}).get("cs2", {}).get("skill_level")
+        nickname = (self.account.external_id or self.account.nickname or "").strip()
+        if not nickname:
+            raise SyncError("Укажи ник Faceit")
 
+        try:
+            client = FaceitClient()
+        except FaceitError as e:
+            raise SyncError(str(e))
+
+        try:
+            player = client.get_player_by_nickname(nickname)
+        except FaceitError as e:
+            raise SyncError(str(e))
+        except Exception as e:
+            raise SyncError(f"Faceit: {e}")
+
+        player_id = player.get("player_id")
+        if not player_id:
+            raise SyncError("Игрок Faceit не найден")
+
+        games = player.get("games") or {}
+        # cs2 приоритет, иначе csgo
+        game_id = None
+        for g in ("cs2", "csgo"):
+            if g in games:
+                game_id = g
+                break
+        if not game_id:
+            # fallback: первый ключ
+            game_id = next(iter(games.keys()), "cs2")
+
+        game_info = games.get(game_id) or {}
+        skill_level = game_info.get("skill_level")
+        faceit_elo = game_info.get("faceit_elo") or game_info.get("elo")
+
+        # lifetime + maps
+        lifetime, segments = {}, []
+        try:
+            stats_payload = client.get_player_stats(player_id, game_id)
+            lifetime = stats_payload.get("lifetime") or {}
+            segments = stats_payload.get("segments") or []
+        except Exception:
+            lifetime, segments = {}, []
+
+        def _num(d, *keys):
+            for k in keys:
+                if k in d and d[k] not in (None, ""):
+                    try:
+                        return float(str(d[k]).replace("%", "").replace(",", "."))
+                    except (TypeError, ValueError):
+                        continue
+            return None
+
+        matches_total = int(_num(lifetime, "Matches", "matches") or 0)
+        winrate = _num(lifetime, "Win Rate %", "Win Rate", "win_rate")
+        kd = _num(lifetime, "Average K/D Ratio", "K/D Ratio", "kd")
+        hs = _num(lifetime, "Average Headshots %", "Headshots %", "hs")
+        wins = int(_num(lifetime, "Wins", "wins") or 0)
+        if not wins and matches_total and winrate is not None:
+            wins = int(round(matches_total * winrate / 100))
+
+        # top maps
+        top_maps = []
+        for seg in segments:
+            if (seg.get("mode") or "").lower() not in ("", "5v5"):
+                # берём map segments
+                pass
+            label = seg.get("label") or seg.get("label") or ""
+            mode = (seg.get("mode") or "").lower()
+            st = seg.get("stats") or {}
+            if not label:
+                continue
+            # часто type == "Map"
+            if seg.get("type") and str(seg.get("type")).lower() not in ("map",):
+                continue
+            m_matches = int(_num(st, "Matches", "matches") or 0)
+            if m_matches <= 0:
+                continue
+            top_maps.append({
+                "name": label,
+                "matches": m_matches,
+                "winrate": _num(st, "Win Rate %", "Win Rate") or 0,
+                "kd": _num(st, "Average K/D Ratio", "K/D Ratio"),
+            })
+        top_maps.sort(key=lambda x: x["matches"], reverse=True)
+        top_maps = top_maps[:8]
+
+        # ----- match history -----
         match_history = []
-        for m in matches.get("items", [])[:10]:
+        recent_items = []
+        try:
+            recent = client.get_recent_match_stats(player_id, game_id, limit=20)
+            recent_items = recent.get("items") or []
+        except Exception:
+            recent_items = []
+
+        # fallback history list without detailed stats
+        if not recent_items:
             try:
-                match_stats = client.get_match_stats(m.get("match_id"))
-                round_data = match_stats.get("rounds", [{}])[0]
-                round_stats = round_data.get("round_stats", {})
-                my_stats, my_team_id = None, None
-                for team in round_data.get("teams", []):
-                    for p in team.get("players", []):
-                        if p.get("player_id") == player["player_id"]:
-                            my_stats = p.get("player_stats", {})
-                            my_team_id = team.get("team_id")
-                won = my_team_id is not None and round_stats.get("Winner") == my_team_id
-                if my_stats:
+                hist = client.get_history(player_id, game=game_id, limit=20)
+                for item in (hist.get("items") or [])[:20]:
+                    match_id = item.get("match_id")
+                    finished = item.get("finished_at") or item.get("started_at")
+                    played_at = None
+                    if finished:
+                        try:
+                            played_at = datetime.utcfromtimestamp(int(finished)).strftime("%d.%m.%Y")
+                        except Exception:
+                            played_at = None
+                    # result: 1 win for player team
+                    result = item.get("results") or {}
+                    winner = (result.get("winner") or "").lower()
+                    teams = item.get("teams") or {}
+                    # find which faction player was in
+                    won = None
+                    for faction_key, team in teams.items():
+                        players = team.get("players") or []
+                        ids = [p.get("player_id") for p in players]
+                        if player_id in ids:
+                            won = faction_key.replace("faction", "faction")  # faction1/2
+                            won = (winner == faction_key) if winner else None
+                            break
+                    map_name = (item.get("competition_name") or "")[:40]
                     match_history.append({
-                        "won": won, "title": round_stats.get("Map", "?"),
-                        "subtitle": f"{my_stats.get('Kills','0')}/{my_stats.get('Deaths','0')}/{my_stats.get('Assists','0')}",
+                        "won": won,
+                        "title": map_name or game_id.upper(),
+                        "subtitle": "—",
                         "duration": None,
+                        "match_id": match_id,
+                        "played_at": played_at,
+                        "verdict": None,
+                        "solo": None,
                         "details": [
-                            {"label": "HS%", "value": my_stats.get("Headshots %", "—")},
-                            {"label": "K/D", "value": my_stats.get("K/D Ratio", "—")},
-                            {"label": "MVP", "value": my_stats.get("MVPs", "—")},
+                            {"label": "Режим", "value": item.get("game_mode") or "5v5"},
                         ],
                     })
             except Exception:
-                continue
+                pass
+        else:
+            for item in recent_items[:20]:
+                stats = item.get("stats") or {}
+                match_id = item.get("match_id") or stats.get("Match Id") or stats.get("match_id")
+                # common faceit keys (string values)
+                def sget(*keys):
+                    for k in keys:
+                        if k in stats and stats[k] not in (None, ""):
+                            return stats[k]
+                    return None
+
+                result = (sget("Result", "result") or "").strip()
+                won = None
+                if str(result) in ("1", "Win", "win", "W"):
+                    won = True
+                elif str(result) in ("0", "Loss", "loss", "L"):
+                    won = False
+
+                kills = sget("Kills", "kills") or "0"
+                deaths = sget("Deaths", "deaths") or "0"
+                assists = sget("Assists", "assists") or "0"
+                kd_m = sget("K/D Ratio", "K/D", "kd")
+                hs_m = sget("Headshots %", "HS %")
+                map_name = sget("Map", "map") or game_id.upper()
+                score = sget("Score", "score")
+
+                played_at = None
+                # sometimes date in item
+                date_raw = item.get("date") or sget("Date")
+                if date_raw:
+                    try:
+                        # ms timestamp
+                        ts = int(date_raw)
+                        if ts > 10_000_000_000:
+                            ts //= 1000
+                        played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
+                    except Exception:
+                        played_at = str(date_raw)[:10]
+
+                # simple verdict by K/D
+                verdict = None
+                try:
+                    kd_f = float(str(kd_m).replace(",", "."))
+                    if kd_f >= 1.4:
+                        verdict = {"label": "Great", "tone": "great"}
+                    elif kd_f >= 1.1:
+                        verdict = {"label": "Good", "tone": "good"}
+                    elif kd_f >= 0.85:
+                        verdict = {"label": "OK", "tone": "neutral"}
+                    elif kd_f >= 0.6:
+                        verdict = {"label": "Bad", "tone": "bad"}
+                    else:
+                        verdict = {"label": "Rough", "tone": "terrible"}
+                except Exception:
+                    verdict = None
+
+                match_history.append({
+                    "won": won,
+                    "title": map_name,
+                    "subtitle": f"{kills}/{deaths}/{assists}" + (f" · KD {kd_m}" if kd_m else ""),
+                    "duration": None,
+                    "match_id": match_id,
+                    "played_at": played_at,
+                    "verdict": verdict,
+                    "solo": None,
+                    "details": [
+                        {"label": "Счёт", "value": score or "—"},
+                        {"label": "K/D", "value": kd_m or "—"},
+                        {"label": "HS %", "value": hs_m or "—"},
+                        {"label": "Карта", "value": map_name},
+                    ],
+                })
+
+        # recent form W/L
+        form = []
+        for m in match_history[:10]:
+            if m["won"] is True:
+                form.append("W")
+            elif m["won"] is False:
+                form.append("L")
 
         self.account.extra_stats = {
-            "matches": match_count, "wins": wins, "winrate": winrate,
-            "avg_kd": avg_kd, "avg_headshots": avg_hs,
-            "elo": elo, "skill_level": skill_level,
+            "player_id": player_id,
+            "game_id": game_id,
+            "skill_level": skill_level,
+            "faceit_elo": faceit_elo,
+            "matches": matches_total,
+            "wins": wins,
+            "winrate": winrate,
+            "kd": kd,
+            "hs_percent": hs,
+            "lifetime": lifetime,
+            "top_maps": top_maps,
+            "recent_form": form,
             "match_history": match_history,
+            "country": player.get("country"),
+            "avatar": player.get("avatar"),
         }
-        self.account.skill_rating = elo
-        self.account.game_label = "CS2"
-        self.account.nickname = player.get("nickname", "")
-        self.account.avatar = player.get("avatar", "")
-        self.account.save(update_fields=["extra_stats", "skill_rating", "game_label", "nickname", "avatar"])
+        self.account.game_label = f"Faceit {game_id.upper()}"
+        self.account.nickname = player.get("nickname") or nickname
+        if faceit_elo is not None:
+            try:
+                self.account.skill_rating = int(faceit_elo)
+            except (TypeError, ValueError):
+                pass
+        if player.get("avatar"):
+            self.account.avatar = player.get("avatar")
+
+        self.account.save(update_fields=[
+            "extra_stats", "game_label", "nickname", "skill_rating", "avatar",
+        ])
         
     def _sync_roblox(self):
         from datetime import datetime
@@ -587,20 +1034,75 @@ def get_daily_playtime(game_account: GameAccount, appid: int, target_date: date)
         return None
     return max(today_snap.playtime_forever - yesterday_snap.playtime_forever, 0)
 
+def get_steam_library(game_account: GameAccount):
+    """Один ряд на appid: часы всего + часы сегодня (дельта с вчера)."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    snaps = list(
+        DailySnapshot.objects
+        .filter(game_account=game_account)
+        .order_by("appid", "-date")
+    )
+
+    latest_by_app = {}
+    by_app_date = {}
+    for s in snaps:
+        by_app_date[(s.appid, s.date)] = s
+        if s.appid not in latest_by_app:
+            latest_by_app[s.appid] = s
+
+    result = []
+    for appid, latest in latest_by_app.items():
+        hours_total = round((latest.playtime_forever or 0) / 60, 1)
+
+        today_s = by_app_date.get((appid, today))
+        yest_s = by_app_date.get((appid, yesterday))
+        hours_today = None
+        if today_s and yest_s:
+            hours_today = round(
+                max((today_s.playtime_forever or 0) - (yest_s.playtime_forever or 0), 0) / 60,
+                1,
+            )
+
+        result.append({
+            "appid": appid,
+            "name": latest.game_name,
+            "hours_total": hours_total,
+            "hours_today": hours_today,  # None → на UI "—"
+        })
+
+    result.sort(key=lambda x: x["hours_total"], reverse=True)
+    return result
 
 def get_account_summary(game_account: GameAccount):
+    if game_account.platform == "steam":
+        library = get_steam_library(game_account)
+        total_hours = sum(g["hours_total"] for g in library)
+        most = library[0]["name"] if library else None
+        return {
+            "total_playtime": int(total_hours * 60),  # минуты, как раньше
+            "most_played_game": most,
+            "games_count": len(library),
+            "library": library,
+        }
+
     snapshots = game_account.snapshots.all()
     if not snapshots:
-        return {"total_playtime": 0, "most_played_game": None, "games_count": 0}
+        return {"total_playtime": 0, "most_played_game": None, "games_count": 0, "library": []}
 
-    total = sum(s.playtime_forever for s in snapshots)
-    most_played = max(snapshots, key=lambda s: s.playtime_forever)
-    games_count = snapshots.values("appid").distinct().count()
-
+    # для не-steam — latest per appid
+    latest = {}
+    for s in snapshots.order_by("-date"):
+        if s.appid not in latest:
+            latest[s.appid] = s
+    total = sum(s.playtime_forever for s in latest.values())
+    most_played = max(latest.values(), key=lambda s: s.playtime_forever) if latest else None
     return {
         "total_playtime": total,
-        "most_played_game": most_played.game_name,
-        "games_count": games_count,
+        "most_played_game": most_played.game_name if most_played else None,
+        "games_count": len(latest),
+        "library": [],
     }
 
 
@@ -631,49 +1133,131 @@ def build_display_stats(platform, extra_stats):
     if platform == "fortnite":
         return {
             "game_label": "Fortnite",
+            "kind": "fortnite_panel",  # фронт рисует FortniteStatsPanel
+            "windows": extra_stats.get("windows") or {},
+            "default_window": extra_stats.get("default_window") or "lifetime",
+            "pr": extra_stats.get("pr"),
+            "earnings": extra_stats.get("earnings"),
+            "bp_level": extra_stats.get("bp_level"),
+            "bp_progress": extra_stats.get("bp_progress"),
             "metrics": [
-                {"label": "матчей", "value": extra_stats.get("matches", 0)},
                 {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
+                {"label": "матчей", "value": extra_stats.get("matches", 0)},
                 {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
                 {"label": "K/D", "value": extra_stats.get("kd", 0)},
             ],
-            "badge": None, "tags": [],
-            "list_title": "Дополнительно",
-            "list": [
-                {"name": "Всего убийств", "sub": "", "value": extra_stats.get("kills", 0)},
-                {"name": "Средний счёт за матч", "sub": "", "value": extra_stats.get("avg_score", "—")},
-            ],
+            "badge": f"BP {extra_stats['bp_level']}" if extra_stats.get("bp_level") is not None else None,
+            "tags": [],
+            "list": [],
             "match_history": [],
         }
-
+    
     if platform == "faceit":
+        skill = extra_stats.get("skill_level")
+        elo = extra_stats.get("faceit_elo")
+        wr = extra_stats.get("winrate")
+        kd = extra_stats.get("kd")
+        hs = extra_stats.get("hs_percent")
+        matches = extra_stats.get("matches") or 0
+        wins = extra_stats.get("wins") or 0
+        game_id = (extra_stats.get("game_id") or "cs2").upper()
+
+        metrics = [
+            {"label": "матчей", "value": matches},
+            {"label": "побед", "value": wins, "tone": "win"},
+            {
+                "label": "винрейт",
+                "value": f"{wr}%" if wr is not None else "—",
+                "tone": "accent",
+            },
+            {"label": "K/D", "value": kd if kd is not None else "—", "tone": "accent"},
+        ]
+        if elo is not None:
+            metrics.append({"label": "ELO", "value": elo, "tone": "accent"})
+        if skill is not None:
+            metrics.append({"label": "LVL", "value": skill})
+
+        tags = []
+        if hs is not None:
+            tags.append({"label": f"HS {hs}%"})
+        if extra_stats.get("country"):
+            tags.append({"label": str(extra_stats["country"]).upper()})
+        form = extra_stats.get("recent_form") or []
+        if form:
+            tags.append({"label": "Форма " + "".join(form[:8])})
+
+        top_maps = extra_stats.get("top_maps") or []
+        list_rows = [
+            {
+                "name": m["name"],
+                "sub": f"{m.get('matches', 0)} матчей",
+                "value": f"{m.get('winrate', 0)}% · KD {m.get('kd') or '—'}",
+                "good": (m.get("winrate") or 0) >= 50,
+            }
+            for m in top_maps[:6]
+        ]
+
         return {
-            "game_label": "CS2",
-            "metrics": [
-                {"label": "матчей", "value": extra_stats.get("matches", 0)},
-                {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
-                {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
-                {"label": "K/D", "value": extra_stats.get("avg_kd", 0)},
+            "game_label": extra_stats.get("game_label") or f"Faceit {game_id}",
+            "metrics": metrics,
+            "badge": f"Level {skill}" if skill is not None else "Faceit",
+            "tags": tags,
+            "list_title": "Топ карты" if list_rows else "",
+            "list": list_rows,
+            "list_title_2": "Сводка",
+            "list_2": [
+                {"name": "Игра", "value": game_id},
+                {"name": "ELO", "value": elo if elo is not None else "—"},
+                {"name": "Уровень", "value": skill if skill is not None else "—"},
+                {"name": "HS %", "value": hs if hs is not None else "—"},
             ],
-            "badge": f"Level {extra_stats.get('skill_level')}" if extra_stats.get("skill_level") else None,
-            "tags": [{"label": f"HS {extra_stats.get('avg_headshots', 0)}%"}],
-            "list_title": "", "list": [],
-            "match_history": extra_stats.get("match_history", []),
+            "match_history": extra_stats.get("match_history") or [],
         }
 
     if platform == "lol":
+        form = extra_stats.get("recent_form") or []
+        form_str = "".join(form[:12]) if form else None
+        top = extra_stats.get("top_champions") or []
+        hist = extra_stats.get("match_history") or []
+        wins_h = sum(1 for m in hist if m.get("won"))
+        wr_recent = round(wins_h / len(hist) * 100, 1) if hist else None
+
+        metrics = [
+            {"label": "solo W", "value": extra_stats.get("wins", 0), "tone": "win"},
+            {"label": "solo L", "value": extra_stats.get("losses", 0), "tone": "loss"},
+            {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
+            {"label": "LP", "value": extra_stats.get("lp") if extra_stats.get("lp") is not None else "—"},
+        ]
+        if extra_stats.get("avg_kda"):
+            metrics.append({"label": "ср. KDA", "value": extra_stats["avg_kda"].split(" ")[0], "tone": "accent"})
+        if wr_recent is not None:
+            metrics.append({"label": "форма", "value": f"{wr_recent}%", "tone": "accent"})
+
         return {
             "game_label": "League of Legends",
-            "metrics": [
-                {"label": "матчей", "value": extra_stats.get("matches", 0)},
-                {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
-                {"label": "поражений", "value": extra_stats.get("losses", 0), "tone": "loss"},
-                {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
+            "metrics": metrics[:6],
+            "badge": extra_stats.get("tier") or "Unranked",
+            "tags": [t for t in [
+                {"label": f"KDA {extra_stats['avg_kda']}"} if extra_stats.get("avg_kda") else None,
+                {"label": f"Main {extra_stats['main_agent']}"} if extra_stats.get("main_agent") else None,
+                {"label": f"Flex {extra_stats['flex_tier']} ({extra_stats.get('flex_lp') or 0} LP)"} if extra_stats.get("flex_tier") else None,
+                {"label": f"Матчей в истории {len(hist)}"},
+                {"label": f"Форма {form_str}"} if form_str else None,
+            ] if t],
+            "list_title": "Топ чемпионы (последние игры)",
+            "list": [
+                {"name": c["name"], "sub": f"{c['games']} игр в выборке", "value": str(c["games"]), "good": c["games"] >= 3}
+                for c in top
             ],
-            "badge": f"{extra_stats.get('tier', '')} {extra_stats.get('rank', '')}".strip() or "Unranked",
-            "tags": [{"label": f"{extra_stats.get('lp', 0)} LP"}],
-            "list_title": "", "list": [],
-            "match_history": extra_stats.get("match_history", []),
+            "list_title_2": "Ранкед",
+            "list_2": [
+                {"name": "Solo/Duo", "sub": f"{extra_stats.get('wins', 0)}W / {extra_stats.get('losses', 0)}L",
+                 "value": f"{extra_stats.get('tier') or '—'} · {extra_stats.get('lp') or 0} LP"},
+                {"name": "Flex", "sub": f"{extra_stats.get('flex_wins') or 0}W / {extra_stats.get('flex_losses') or 0}L",
+                 "value": f"{extra_stats.get('flex_tier') or '—'} · {extra_stats.get('flex_lp') or 0} LP"},
+                {"name": "Регион", "sub": "", "value": (extra_stats.get("riot_platform") or "euw1").upper()},
+            ],
+            "match_history": hist,
         }
 
     if platform == "valorant":
@@ -692,17 +1276,47 @@ def build_display_stats(platform, extra_stats):
         }
 
     if platform == "pubg":
+        status_map = {
+            0: "Offline", 1: "Online", 2: "Busy", 3: "Away",
+            4: "Snooze", 5: "Trade", 6: "Looking to play",
+        }
+        st = status_map.get(extra_stats.get("steam_status"), "—")
+        h = extra_stats.get("hours_played") or 0
+        h2 = extra_stats.get("hours_2weeks") or 0
         return {
             "game_label": "PUBG",
             "metrics": [
-                {"label": "матчей", "value": extra_stats.get("matches", 0)},
-                {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
-                {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
-                {"label": "K/D", "value": extra_stats.get("kd", 0)},
+                {"label": "часов", "value": h, "tone": "accent"},
+                {"label": "2 недели", "value": h2},
+                {"label": "минут", "value": extra_stats.get("minutes_forever") or int(h * 60)},
             ],
-            "badge": None, "tags": [],
-            "list_title": "Статистика",
-            "list": [{"name": "Всего убийств", "sub": "", "value": extra_stats.get("kills", 0)}],
+            "badge": "Steam · limited",
+            "tags": [t for t in [
+                {"label": st},
+                {"label": extra_stats["steam_country"]} if extra_stats.get("steam_country") else None,
+                {"label": "Нет BR API — только playtime"},
+            ] if t],
+            "list_title": "Почему мало цифр",
+            "list": [
+                {
+                    "name": "Источник",
+                    "sub": "Steam GetOwnedGames (app 578080)",
+                    "value": f"{h} ч",
+                    "good": True,
+                },
+                {
+                    "name": "Недоступно без PUBG API",
+                    "sub": "wins, K/D, damage, seasons, matches",
+                    "value": "—",
+                    "good": False,
+                },
+            ],
+            "list_title_2": "Профиль",
+            "list_2": [
+                {"name": "Статус Steam", "sub": "", "value": st},
+                {"name": "Страна", "sub": "", "value": extra_stats.get("steam_country") or "—"},
+                {"name": "За 14 дней", "sub": "", "value": f"{h2} ч"},
+            ],
             "match_history": [],
         }
 

@@ -183,7 +183,8 @@ REST_FRAMEWORK = {
 STEAM_API_KEY = config("STEAM_API_KEY")
 RIOT_API_KEY =config('RIOT_API_KEY')
 VALORANT_API_KEY = config('VALORANT_API_KEY', default='')
-TRN_API_KEY = config('TRN_API_KEY', default='')
+TRACKER_API_KEY = config('TRACKER_API_KEY', default='')
+FORTNITE_API_KEY = config("FORTNITE_API_KEY", default="")
 
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')

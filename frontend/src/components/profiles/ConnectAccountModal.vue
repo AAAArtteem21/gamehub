@@ -17,6 +17,7 @@ const platforms = [
   { value: 'valorant', label: 'Valorant', hint: 'Ник#TAG (Riot ID)' },
   { value: 'pubg', label: 'PUBG', hint: 'Ник в PUBG (Steam)' },
   { value: 'roblox', label: 'Roblox', hint: 'Никнейм Roblox' },
+  { value: 'fortnite', label: 'Fortnite', hint: 'Никнейм Epic Games' },
 ]
 async function submit() {
   submitting.value = true

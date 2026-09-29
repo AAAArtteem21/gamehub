@@ -5,7 +5,7 @@ import GameIcon from './GameIcon.vue'
 const props = defineProps({ post: Object, onRespond: Function })
 const emit = defineEmits(['open-chat'])
 
-const state = ref('idle') // idle | loading | done | error
+const state = ref('idle')
 
 function formatDate(dt) {
   return new Date(dt).toLocaleString('ru-RU', {
@@ -36,7 +36,7 @@ async function handleRespond() {
 </script>
 
 <template>
-  <div class="lfg-card fade-in-up" :class="{ closed: post.status === 'closed' }">
+  <div class="lfg-card clickable-card fade-in-up" :class="{ closed: post.status === 'closed' }">
     <GameIcon :game="post.game" />
 
     <div class="lfg-main">
@@ -54,10 +54,7 @@ async function handleRespond() {
 
       <div class="lfg-meta">
         <RouterLink :to="`/players/${post.author_id}`" class="author-link">
-          <div
-            class="author-avatar"
-            :style="post.author_avatar ? { backgroundImage: `url(${post.author_avatar})` } : {}"
-          >
+          <div class="author-avatar" :style="post.author_avatar ? { backgroundImage: `url(${post.author_avatar})` } : {}">
             <span v-if="!post.author_avatar">{{ post.author?.[0]?.toUpperCase() }}</span>
           </div>
           <span>{{ post.author }}</span>
@@ -79,7 +76,7 @@ async function handleRespond() {
         v-if="post.status === 'open' && !post.is_author && !post.has_responded"
         class="btn-respond"
         :class="state"
-        @click="handleRespond"
+        @click.stop="handleRespond"
         :disabled="state === 'loading' || state === 'done'"
       >
         <span v-if="state === 'idle'">Откликнуться</span>
@@ -91,7 +88,7 @@ async function handleRespond() {
       <button
         v-if="post.has_responded || post.is_author"
         class="btn-chat"
-        @click="emit('open-chat', post)"
+        @click.stop="emit('open-chat', post)"
       >
         💬 Чат
       </button>
@@ -108,226 +105,65 @@ async function handleRespond() {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  transition: border-color 0.25s var(--ease), transform 0.25s var(--ease), box-shadow 0.25s var(--ease);
 }
 
-.lfg-card:hover {
-  border-color: var(--border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
-}
+.lfg-card.closed { opacity: 0.6; }
 
-.lfg-card.closed {
-  opacity: 0.6;
-}
+.lfg-main { flex: 1; min-width: 0; }
 
-.lfg-main {
-  flex: 1;
-  min-width: 0;
-}
+.lfg-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 10px; }
+.lfg-game-name { font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.3px; }
 
-.lfg-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  gap: 10px;
-}
+.badges { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 
-.lfg-game-name {
-  font-weight: 700;
-  font-size: 15px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
+.slots-badge { font-size: 11px; font-weight: 700; color: var(--text-primary); background: var(--bg-card-hover); padding: 3px 9px; border-radius: 20px; }
+.lfg-time-badge { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-dim); padding: 3px 8px; border-radius: 20px; }
+.closed-badge { font-size: 11px; font-weight: 700; color: var(--danger); background: rgba(248, 113, 113, 0.12); padding: 3px 9px; border-radius: 20px; }
 
-.badges {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-shrink: 0;
-}
+.lfg-description { font-size: 13px; color: var(--text-primary); margin: 0 0 10px; line-height: 1.4; }
+.lfg-description.muted { color: var(--text-secondary); font-style: italic; }
 
-.slots-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-primary);
-  background: var(--bg-card-hover);
-  padding: 3px 9px;
-  border-radius: 20px;
-}
+.lfg-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
 
-.lfg-time-badge {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-dim);
-  padding: 3px 8px;
-  border-radius: 20px;
-}
-
-.closed-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--danger);
-  background: rgba(248, 113, 113, 0.12);
-  padding: 3px 9px;
-  border-radius: 20px;
-}
-
-.lfg-description {
-  font-size: 13px;
-  color: var(--text-primary);
-  margin: 0 0 10px;
-  line-height: 1.4;
-}
-
-.lfg-description.muted {
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-.lfg-meta {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.author-link {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  text-decoration: none;
-  color: var(--text-secondary);
-  font-size: 12px;
-  transition: color 0.15s var(--ease);
-}
-
-.author-link:hover {
-  color: var(--accent);
-}
-
+.author-link { display: flex; align-items: center; gap: 6px; text-decoration: none; color: var(--text-secondary); font-size: 12px; transition: color 0.15s var(--ease); }
+.author-link:hover { color: var(--accent); }
 .author-avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background-color: var(--accent-dim);
-  background-size: cover;
-  background-position: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent);
-  flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: 50%; background-color: var(--accent-dim);
+  background-size: cover; background-position: center; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; font-weight: 700; color: var(--accent); flex-shrink: 0;
 }
 
-.meta-item {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
+.meta-item { font-size: 12px; color: var(--text-secondary); }
 
-.contact-row {
-  font-size: 12px;
-  padding: 8px 10px;
-  background: var(--bg-primary);
-  border-radius: 8px;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
+.contact-row { font-size: 12px; padding: 8px 10px; background: var(--bg-primary); border-radius: 8px; display: flex; gap: 6px; align-items: center; }
+.contact-label { color: var(--text-secondary); }
+.contact-value { color: var(--success); font-weight: 600; }
+.contact-row.locked { color: var(--text-muted); }
+.lock-icon { font-size: 11px; }
 
-.contact-label {
-  color: var(--text-secondary);
-}
-
-.contact-value {
-  color: var(--success);
-  font-weight: 600;
-}
-
-.contact-row.locked {
-  color: var(--text-muted);
-}
-
-.lock-icon {
-  font-size: 11px;
-}
-
-.lfg-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
+.lfg-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 
 .btn-respond {
-  background: transparent;
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  padding: 9px 18px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  min-width: 128px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: transparent; border: 1px solid var(--accent); color: var(--accent);
+  padding: 9px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; min-width: 128px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
   transition: background 0.2s var(--ease), color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
-
-.btn-respond:hover:not(:disabled) {
-  background: var(--accent);
-  color: white;
-  box-shadow: var(--shadow-glow);
-}
-
-.btn-respond.done {
-  background: rgba(74, 222, 128, 0.12);
-  border-color: var(--success);
-  color: var(--success);
-  cursor: default;
-}
-
-.btn-respond.error {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.btn-respond:disabled {
-  cursor: default;
-}
+.btn-respond:hover:not(:disabled) { background: var(--accent); color: white; box-shadow: var(--shadow-glow); }
+.btn-respond.done { background: rgba(74, 222, 128, 0.12); border-color: var(--success); color: var(--success); cursor: default; }
+.btn-respond.error { border-color: var(--danger); color: var(--danger); }
+.btn-respond:disabled { cursor: default; }
 
 .btn-chat {
-  background: var(--bg-card-hover);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 9px 18px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  min-width: 128px;
-  height: 36px;
-  transition: border-color 0.2s var(--ease);
+  background: var(--bg-card-hover); border: 1px solid var(--border-color); color: var(--text-primary);
+  padding: 9px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer;
+  min-width: 128px; height: 36px; transition: border-color 0.2s var(--ease);
 }
-
-.btn-chat:hover {
-  border-color: var(--border-hover);
-}
+.btn-chat:hover { border-color: var(--border-hover); }
 
 .spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(230, 57, 70, 0.3);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+  width: 14px; height: 14px; border: 2px solid rgba(230, 57, 70, 0.3);
+  border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite;
 }
 </style>

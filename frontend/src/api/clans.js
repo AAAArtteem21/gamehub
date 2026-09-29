@@ -25,4 +25,8 @@ export const clansApi = {
   leave(id) {
     return api.post(`clans/${id}/leave/`)
   },
+  listByUrl(url) {
+    const path = url.replace(/^https?:\/\/[^/]+\/api\//, '')
+    return api.get(path)
+  },
 }
