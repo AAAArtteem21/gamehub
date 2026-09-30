@@ -1,6 +1,8 @@
 <script setup>
 import logo from '../assets/images/logo.png'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 function getCookie(name) {
   const value = `; ${document.cookie}`
   const parts = value.split(`; ${name}=`)
@@ -8,14 +10,12 @@ function getCookie(name) {
 }
 
 async function loginWithSteam() {
-  // сначала гарантируем, что CSRF-cookie установлена
-  await fetch('http://localhost:8000/api/csrf/', { credentials: 'include' })
+  await fetch(`${API_BASE}/api/csrf/`, { credentials: 'include' })
   const csrftoken = getCookie('csrftoken')
 
-  // создаём скрытую форму и отправляем POST — GET сюда не пускают (защита от CSRF)
   const form = document.createElement('form')
   form.method = 'POST'
-  form.action = 'http://localhost:8000/auth/login/steam/'
+  form.action = `${API_BASE}/auth/login/steam/`
 
   const input = document.createElement('input')
   input.type = 'hidden'
@@ -30,12 +30,14 @@ async function loginWithSteam() {
 
 <template>
   <div class="login-page">
-    <div class="login-card card">
+    <div class="login-card">
       <img :src="logo" alt="GameEyes" class="logo-mark" />
-      <h1>GAME<span class="accent-text">EYES</span></h1>
-      <p class="tagline">FIND. PLAY. WIN.</p>
-      <p class="subtitle">Верифицированная статистика. Реальные тиммейты.</p>
-      <button class="btn-steam" @click="loginWithSteam">
+      <h1>GAME<span class="accent">EYES</span></h1>
+      <p class="tagline">find · play · win</p>
+      <p class="subtitle">
+        Статистика с привязанных аккаунтов. Поиск тиммейтов и кланы.
+      </p>
+      <button type="button" class="btn-steam" @click="loginWithSteam">
         Войти через Steam
       </button>
     </div>
@@ -44,18 +46,64 @@ async function loginWithSteam() {
 
 <style scoped>
 .login-page {
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-primary);
+  padding: 24px;
 }
-.login-card { width: 380px; padding: 48px 32px; text-align: center; }
-.logo-mark { width: 72px; height: 72px; border-radius: var(--radius-md); object-fit: cover; margin: 0 auto 20px; }
-h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: 0.5px; }
-.accent-text { color: var(--accent); }
-.tagline { font-size: 11px; letter-spacing: 1.5px; color: var(--accent); font-weight: 700; margin: 0 0 16px; }
-.subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 28px; }
-.btn-steam { width: 100%; background: #1B2838; color: white; border: none; padding: 13px; border-radius: var(--radius-sm); font-weight: 600; font-size: 14px; cursor: pointer; }
-.btn-steam:hover { background: #2A3F5A; }
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 40px 28px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.logo-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  margin: 0 auto 16px;
+  display: block;
+}
+h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.accent { color: var(--accent); }
+.tagline {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin: 0 0 14px;
+  text-transform: lowercase;
+}
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 0 0 24px;
+  line-height: 1.45;
+}
+.btn-steam {
+  width: 100%;
+  background: #1b2838;
+  color: #fff;
+  border: 1px solid #2a3f5a;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-steam:hover {
+  background: #243447;
+  border-color: #3d5a80;
+}
 </style>

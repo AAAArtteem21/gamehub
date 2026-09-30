@@ -146,7 +146,7 @@ onMounted(() => {
       <img :src="logo" alt="GameEyes" class="logo-mark" />
       <div class="logo-text-group">
         <span class="logo-text">GAME<span class="accent-text">EYES</span></span>
-        <span class="logo-tagline">FIND. PLAY. WIN.</span>
+        <span class="logo-tagline">find · play · win</span>
       </div>
     </div>
 
@@ -185,7 +185,7 @@ onMounted(() => {
         <div
           class="week-ring"
           :style="{
-            background: `conic-gradient(var(--success) 0 ${winPct}%, rgba(248,113,113,0.28) ${winPct}% 100%)`,
+            background: `conic-gradient(var(--success) 0 ${winPct}%, rgba(201,122,114,0.25) ${winPct}% 100%)`,
           }"
         >
           <div class="week-ring-inner">{{ winPct }}%</div>
@@ -299,18 +299,17 @@ onMounted(() => {
 
 <style scoped>
 .sidebar {
-  width: 248px;
+  width: var(--sidebar-w);
   height: 100vh;
   position: fixed;
   left: 0;
   top: 0;
-  background: rgba(20, 23, 30, 0.94);
-  backdrop-filter: blur(14px);
+  background: var(--bg-sunken);
   border-right: 1px solid var(--border-color);
-  padding: 18px 12px;
+  padding: 14px 10px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   overflow-y: auto;
   box-sizing: border-box;
   z-index: 40;
@@ -319,89 +318,93 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 8px 8px;
+  padding: 4px 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 2px;
   flex-shrink: 0;
 }
 .logo-mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
   object-fit: cover;
   flex-shrink: 0;
 }
 .logo-text-group {
   display: flex;
   flex-direction: column;
-  line-height: 1.1;
+  line-height: 1.15;
+  min-width: 0;
 }
 .logo-text {
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 13px;
   color: var(--text-primary);
 }
 .accent-text { color: var(--accent); }
 .logo-tagline {
   font-size: 9px;
-  letter-spacing: 1.2px;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
-  font-weight: 600;
+  font-weight: 500;
+  text-transform: lowercase;
 }
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   flex-shrink: 0;
-  padding: 0 2px;
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 13px;
-  font-weight: 600;
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+  font-weight: 500;
+  border-left: 2px solid transparent;
 }
 .nav-item:hover {
-  background: var(--bg-card-hover);
+  background: var(--bg-card);
   color: var(--text-primary);
   text-decoration: none;
 }
 .nav-item.active {
-  background: var(--accent-dim);
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(230, 57, 70, 0.22);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-left-color: var(--accent);
 }
 .nav-icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.9;
+  opacity: 0.8;
 }
-.nav-icon svg { width: 18px; height: 18px; }
+.nav-icon svg { width: 16px; height: 16px; }
+
 .sidebar-widget {
-  background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: var(--radius-sm);
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
+  background: transparent;
 }
 .foot-widget { margin-top: auto; }
 .widget-title {
   font-size: 10px;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 800;
+  letter-spacing: 0.07em;
+  font-weight: 600;
 }
 .widget-row {
   display: flex;
@@ -412,18 +415,20 @@ onMounted(() => {
 }
 .widget-label { color: var(--text-secondary); }
 .widget-value {
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
 .widget-value.accent { color: var(--accent); }
+
 .week-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 .week-ring {
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   flex-shrink: 0;
   display: flex;
@@ -431,22 +436,22 @@ onMounted(() => {
   justify-content: center;
 }
 .week-ring-inner {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: var(--bg-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
 }
 .week-nums {
   font-size: 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 .week-nums .w { color: var(--success); }
 .week-nums .l { color: var(--danger); }
@@ -458,30 +463,29 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.period {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.week-games {
+.period { font-size: 11px; color: var(--text-muted); }
+
+.week-games, .clan-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
-.week-game-btn {
+.week-game-btn, .clan-tab {
   font-size: 10px;
-  font-weight: 700;
-  padding: 4px 9px;
-  border-radius: 999px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: none;
   color: var(--text-secondary);
   cursor: pointer;
 }
-.week-game-btn.active {
-  background: var(--accent-dim);
+.week-game-btn.active, .clan-tab.active {
+  border-color: var(--accent);
   color: var(--accent);
-  border-color: rgba(230, 57, 70, 0.4);
+  background: var(--accent-dim);
 }
+
 .fav-empty {
   font-size: 11px;
   color: var(--text-muted);
@@ -495,51 +499,36 @@ onMounted(() => {
   background: none;
   border: none;
   color: inherit;
-  padding: 5px 4px;
+  padding: 4px;
   cursor: pointer;
   text-align: left;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
-.fav-item:hover { background: var(--bg-card-hover); }
+.fav-item:hover { background: var(--bg-card); }
 .fav-av {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   flex-shrink: 0;
   background: var(--accent-dim) center/cover no-repeat;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--accent);
 }
 .fav-name {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.clan-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
-.clan-tab {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border-color);
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.clan-tab.active {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: rgba(230, 57, 70, 0.4);
-}
+
 .clan-one-name {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -547,81 +536,74 @@ onMounted(() => {
 }
 .my-role {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--accent);
   background: var(--accent-dim);
-  padding: 2px 7px;
-  border-radius: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 .clan-sub {
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   margin-top: 2px;
 }
-.clan-feed,
-.clan-chat {
-  max-height: 120px;
+.clan-feed, .clan-chat {
+  max-height: 110px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
-.feed-line,
-.chat-line {
+.feed-line, .chat-line {
   font-size: 11px;
   line-height: 1.35;
   color: var(--text-secondary);
 }
-.feed-line b,
-.chat-line b {
+.feed-line b, .chat-line b {
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: 600;
 }
 .chat-role {
   font-size: 9px;
-  font-weight: 800;
-  padding: 1px 5px;
-  border-radius: 6px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
   margin-right: 3px;
 }
 .chat-role.leader {
-  background: rgba(240, 199, 94, 0.2);
-  color: #f0c75e;
-}
-.chat-role.officer {
   background: var(--accent-dim);
   color: var(--accent);
 }
+.chat-role.officer {
+  background: var(--accent-2-dim);
+  color: var(--accent-2);
+}
 .chat-role.member {
-  background: var(--bg-card-hover);
+  background: var(--bg-card);
   color: var(--text-muted);
 }
 .chat-form {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   margin-top: 2px;
 }
 .chat-form input {
   flex: 1;
   min-width: 0;
   font-size: 11px;
-  padding: 7px 9px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-primary);
+  padding: 6px 8px;
 }
 .chat-form button {
-  border: none;
+  border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
-  border-radius: 8px;
-  padding: 0 12px;
+  color: #12100c;
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 700;
 }
 .chat-form button:disabled { opacity: 0.5; }
 </style>

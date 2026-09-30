@@ -46,7 +46,10 @@ function showMore() {
       :class="{ win: m.won === true, loss: m.won === false }"
     >
       <div class="match-summary" @click="toggle(i)">
-        <span class="result-badge" v-if="m.won !== null && m.won !== undefined">
+        <span
+          class="result-badge"
+          v-if="m.won !== null && m.won !== undefined"
+        >
           {{ m.won ? 'W' : 'L' }}
         </span>
         <div class="match-main">
@@ -57,7 +60,11 @@ function showMore() {
         </div>
         <div class="match-right">
           <div class="verdict-row">
-            <span class="verdict-badge" v-if="m.verdict" :class="m.verdict.tone">{{ m.verdict.label }}</span>
+            <span
+              class="verdict-badge"
+              v-if="m.verdict"
+              :class="m.verdict.tone"
+            >{{ m.verdict.label }}</span>
             <span class="solo-badge" v-if="m.solo">Соло</span>
           </div>
           <span v-if="m.played_at">{{ m.played_at }}</span>
@@ -68,23 +75,32 @@ function showMore() {
 
       <transition name="expand">
         <div class="match-details-expanded" v-if="expandedIndex === i">
-          <div class="detail-item" v-for="d in (m.details || [])" :key="d.label">
+          <div
+            class="detail-item"
+            v-for="d in (m.details || [])"
+            :key="d.label"
+          >
             <span class="detail-label">{{ d.label }}</span>
             <span class="detail-value">{{ d.value }}</span>
           </div>
           <button
-          type="button"
-          class="view-participants-btn"
-          v-if="m.match_id && canOpenParticipants"
-          @click.stop="openParticipants(m)"
-        >
-          👥 Кто играл
-        </button>
+            type="button"
+            class="view-participants-btn"
+            v-if="m.match_id && canOpenParticipants"
+            @click.stop="openParticipants(m)"
+          >
+            Кто играл
+          </button>
         </div>
       </transition>
     </div>
 
-    <button v-if="canShowMore" type="button" class="show-more-btn" @click="showMore">
+    <button
+      v-if="canShowMore"
+      type="button"
+      class="show-more-btn"
+      @click="showMore"
+    >
       Показать ещё
       <span class="show-more-count">
         ({{ visibleMatches.length }} / {{ matches.length }})
@@ -97,77 +113,82 @@ function showMore() {
 .match-history {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .match-history h4 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
 
 .match-row {
-  background: var(--bg-primary);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color);
-  border-left: 3px solid var(--border-color);
-  border-radius: 12px;
+  border-left: 2px solid var(--border-color);
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
 .match-row:hover {
   border-color: var(--border-hover);
-  background: var(--bg-card-hover);
 }
-.match-row.win { border-left-color: var(--success); }
-.match-row.loss { border-left-color: var(--danger); }
+.match-row.win {
+  border-left-color: var(--success);
+}
+.match-row.loss {
+  border-left-color: var(--danger);
+}
 
 .match-summary {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 10px 12px;
   cursor: pointer;
 }
 
 .result-badge {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: 700;
   flex-shrink: 0;
+  font-family: var(--font-mono);
 }
 .match-row.win .result-badge {
-  background: rgba(74, 222, 128, 0.15);
+  background: rgba(106, 170, 124, 0.15);
   color: var(--success);
 }
 .match-row.loss .result-badge {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgba(201, 122, 114, 0.15);
   color: var(--danger);
 }
 
-.match-main { flex: 1; min-width: 0; }
+.match-main {
+  flex: 1;
+  min-width: 0;
+}
 .match-top {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .match-title {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 13px;
-  letter-spacing: -0.01em;
 }
 .match-subtitle {
   font-size: 12px;
   color: var(--text-secondary);
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -179,6 +200,7 @@ function showMore() {
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -190,13 +212,17 @@ function showMore() {
 
 .match-details-expanded {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 10px;
-  padding: 12px 14px 14px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--bg-card);
 }
-.detail-item { display: flex; flex-direction: column; gap: 3px; }
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .detail-label {
   font-size: 10px;
   font-weight: 600;
@@ -206,38 +232,37 @@ function showMore() {
 }
 .detail-value {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-primary);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .view-participants-btn {
   grid-column: 1 / -1;
-  margin-top: 4px;
+  margin-top: 2px;
   background: var(--accent-dim);
-  border: none;
+  border: 1px solid rgba(196, 165, 116, 0.25);
   color: var(--accent);
-  padding: 9px;
+  padding: 8px;
   border-radius: var(--radius-sm);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
 .view-participants-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: #12100c;
+  border-color: var(--accent);
 }
 
 .expand-enter-active,
 .expand-leave-active {
-  transition: opacity 0.2s var(--ease), max-height 0.25s var(--ease);
-  overflow: hidden;
+  transition: opacity 0.15s var(--ease);
 }
 .expand-enter-from,
 .expand-leave-to {
   opacity: 0;
-  max-height: 0;
 }
 
 .verdict-row {
@@ -249,37 +274,51 @@ function showMore() {
 }
 .verdict-badge {
   font-size: 9px;
-  font-weight: 800;
-  padding: 2px 7px;
-  border-radius: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
   text-transform: uppercase;
 }
-.verdict-badge.great { background: rgba(74, 222, 128, 0.2); color: var(--success); }
-.verdict-badge.good { background: var(--accent-dim); color: var(--accent); }
-.verdict-badge.neutral { background: var(--bg-card-hover); color: var(--text-secondary); }
-.verdict-badge.bad { background: rgba(240, 160, 32, 0.15); color: var(--warning, #F0A020); }
-.verdict-badge.terrible { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
+.verdict-badge.great {
+  background: rgba(106, 170, 124, 0.18);
+  color: var(--success);
+}
+.verdict-badge.good {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.verdict-badge.neutral {
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+}
+.verdict-badge.bad {
+  background: rgba(196, 163, 90, 0.15);
+  color: var(--warning);
+}
+.verdict-badge.terrible {
+  background: rgba(201, 122, 114, 0.18);
+  color: var(--danger);
+}
 .solo-badge {
   font-size: 9px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
   background: var(--bg-card-hover);
   color: var(--text-muted);
 }
 
 .show-more-btn {
   width: 100%;
-  margin-top: 6px;
-  padding: 11px;
+  margin-top: 4px;
+  padding: 10px;
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   color: var(--accent);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
 .show-more-btn:hover {
   border-color: var(--accent);
@@ -288,7 +327,7 @@ function showMore() {
 .show-more-count {
   color: var(--text-muted);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 11px;
   margin-left: 4px;
 }
 </style>

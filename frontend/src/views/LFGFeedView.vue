@@ -23,7 +23,6 @@ const chatSidebarRef = ref(null)
 const gameFilter = ref('')
 const searchTerm = ref('')
 
-
 async function loadPosts() {
   loading.value = true
   error.value = null
@@ -49,7 +48,7 @@ async function loadMore() {
     posts.value.push(...(res.data.results || []))
     nextPageUrl.value = res.data.next || null
   } catch (e) {
-    // тихо игнорируем — юзер может просто попробовать ещё раз
+    /* */
   } finally {
     loadingMore.value = false
   }
@@ -57,7 +56,7 @@ async function loadMore() {
 
 async function respond(postId) {
   await lfgApi.respond(postId)
-  const post = posts.value.find(p => p.id === postId)
+  const post = posts.value.find((p) => p.id === postId)
   if (post) {
     post.responses_count += 1
     post.has_responded = true
@@ -70,12 +69,20 @@ function onPostCreated(newPost) {
 }
 
 function openChat(threadOrPost) {
-  chatPost.value = { id: threadOrPost.post_id ?? threadOrPost.id, game: threadOrPost.game }
+  chatPost.value = {
+    id: threadOrPost.post_id ?? threadOrPost.id,
+    game: threadOrPost.game,
+  }
 }
 
 function closeChat() {
   chatPost.value = null
   chatSidebarRef.value?.loadThreads()
+}
+
+function setFilter(g) {
+  gameFilter.value = g
+  loadPosts()
 }
 
 onMounted(() => {
@@ -91,18 +98,32 @@ onMounted(() => {
         <h1>Поиск тиммейтов</h1>
         <p class="subtitle">Заявки от игроков с верифицированной статистикой</p>
       </div>
-      <button class="btn-primary" @click="showCreateModal = true">+ Создать заявку</button>
+      <button type="button" class="btn-primary" @click="showCreateModal = true">
+        + Создать заявку
+      </button>
     </div>
 
     <NotificationsPanel />
 
     <div class="filters-wrap">
       <div class="filters">
-        <button class="filter-chip" :class="{ active: gameFilter === '' }" @click="gameFilter = ''; loadPosts()">
+        <button
+          type="button"
+          class="filter-chip"
+          :class="{ active: gameFilter === '' }"
+          @click="setFilter('')"
+        >
           Все игры
         </button>
-        <button v-for="g in GAMES" :key="g" class="filter-chip" :class="{ active: gameFilter === g }" @click="gameFilter = g; loadPosts()">
-          <GameIcon :game="g" :size="18" />
+        <button
+          v-for="g in GAMES"
+          :key="g"
+          type="button"
+          class="filter-chip"
+          :class="{ active: gameFilter === g }"
+          @click="setFilter(g)"
+        >
+          <GameIcon :game="g" :size="16" />
           {{ g }}
         </button>
       </div>
@@ -113,11 +134,13 @@ onMounted(() => {
         <div v-if="loading" class="state-message">Загружаем заявки...</div>
         <div v-else-if="error" class="state-message error-state">
           {{ error }}
-          <button class="retry-btn" @click="loadPosts">Повторить</button>
+          <button type="button" class="retry-btn" @click="loadPosts">Повторить</button>
         </div>
         <div v-else-if="posts.length === 0" class="state-message empty-state">
           <p>Пока нет активных заявок{{ gameFilter ? ` по ${gameFilter}` : '' }}.</p>
-          <button class="btn-primary" @click="showCreateModal = true">Создать первую заявку</button>
+          <button type="button" class="btn-primary" @click="showCreateModal = true">
+            Создать первую заявку
+          </button>
         </div>
         <div v-else class="posts-list">
           <LFGCard
@@ -130,9 +153,10 @@ onMounted(() => {
         </div>
         <button
           v-if="nextPageUrl"
+          type="button"
           class="load-more-btn"
-          @click="loadMore"
           :disabled="loadingMore"
+          @click="loadMore"
         >
           {{ loadingMore ? 'Загружаем...' : 'Загрузить ещё' }}
         </button>
@@ -141,76 +165,77 @@ onMounted(() => {
       <ChatSidebar ref="chatSidebarRef" @open-thread="openChat" />
     </div>
 
-    <CreatePostModal v-if="showCreateModal" @close="showCreateModal = false" @created="onPostCreated" />
+    <CreatePostModal
+      v-if="showCreateModal"
+      @close="showCreateModal = false"
+      @created="onPostCreated"
+    />
     <ChatModal v-if="chatPost" :post="chatPost" @close="closeChat" />
   </div>
 </template>
 
 <style scoped>
-.lfg-page { display: flex; flex-direction: column; gap: 20px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.page-header h1 { margin: 0 0 4px; font-size: 24px; }
-.subtitle { margin: 0; color: var(--text-secondary); font-size: 14px; }
-
-.filters {
-  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px;
-  scrollbar-width: thin;
+.lfg-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
 }
-.filter-chip { flex-shrink: 0; }
-.filter-chip:hover { color: var(--text-primary); }
-.filter-chip.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-
-.content-grid { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
-.feed-column { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.posts-list { display: flex; flex-direction: column; gap: 12px; }
-
-.state-message { padding: 60px 20px; text-align: center; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-.error-state { color: var(--danger); display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.retry-btn { background: var(--bg-card-hover); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; }
-
-.load-more-btn {
-  background: var(--bg-card-hover);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 12px;
-  border-radius: var(--radius-sm);
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
   font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.2s var(--ease);
 }
-.load-more-btn:hover:not(:disabled) { border-color: var(--border-hover); }
-.load-more-btn:disabled { opacity: 0.6; cursor: default; }
+.subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .filters-wrap {
   position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 .filters {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
-  padding: 4px 2px 10px;
+  padding: 2px 0;
   scrollbar-width: thin;
   scrollbar-color: var(--border-hover) transparent;
 }
-.filters::-webkit-scrollbar { height: 5px; }
-.filters::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 10px; }
-
+.filters::-webkit-scrollbar { height: 6px; }
+.filters::-webkit-scrollbar-track { background: transparent; }
+.filters::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border-radius: 3px;
+}
 .filter-chip {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   flex-shrink: 0;
-  background: var(--bg-card);
+  background: var(--bg-card-hover);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  padding: 7px 16px 7px 10px;
-  border-radius: 20px;
-  font-size: 12.5px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s var(--ease);
+  transition: all 0.18s ease;
 }
 .filter-chip:hover {
   color: var(--text-primary);
@@ -218,29 +243,72 @@ onMounted(() => {
   transform: translateY(-1px);
 }
 .filter-chip.active {
-  background: linear-gradient(135deg, var(--accent-dim), rgba(230, 57, 70, 0.06));
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: 0 2px 10px rgba(230, 57, 70, 0.15);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+  border-color: transparent;
+  color: var(--bg-page, #0d1117);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-/* лёгкое затухание по краям, намекает что список скроллится */
-.filters-wrap::before, .filters-wrap::after {
-  content: '';
-  position: absolute;
-  top: 0; bottom: 10px;
-  width: 24px;
-  pointer-events: none;
-  z-index: 1;
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+  align-items: start;
 }
-.filters-wrap::before {
-  left: 0;
-  background: linear-gradient(90deg, var(--bg-primary), transparent);
+.feed-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
-.filters-wrap::after {
-  right: 0;
-  background: linear-gradient(270deg, var(--bg-primary), transparent);
+.posts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
+
+.state-message {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.error-state {
+  color: var(--danger);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.retry-btn {
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.load-more-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.load-more-btn:hover:not(:disabled) { border-color: var(--border-hover); }
+.load-more-btn:disabled { opacity: 0.55; cursor: default; }
 
 @media (max-width: 900px) {
   .content-grid { grid-template-columns: 1fr; }

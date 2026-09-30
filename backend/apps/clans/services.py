@@ -18,40 +18,61 @@ from apps.profiles.models import DailySnapshot
 
 
 def _period_activity(user_ids, start_date, end_date):
+    """
+    Минуты, наигранные в [start_date, end_date] по дельте playtime_forever.
+    user_ids: iterable of user id
+    """
+    from collections import defaultdict
+    from apps.profiles.models import DailySnapshot
+
+    if not user_ids:
+        return {}
+
     snapshots = (
         DailySnapshot.objects
         .filter(game_account__user_id__in=user_ids, date__lte=end_date)
-        .select_related('game_account')
-        .order_by('date')
+        .select_related("game_account")
+        .order_by("date")
     )
 
-    points = defaultdict(list)
+    # (user_id, appid) -> list[(date, playtime_forever)]
+    series = defaultdict(list)
     for s in snapshots:
-        points[(s.game_account.user_id, s.appid)].append((s.date, s.playtime_forever))
+        series[(s.game_account.user_id, s.appid)].append(
+            (s.date, int(s.playtime_forever or 0))
+        )
 
     result = defaultdict(int)
-    for (user_id, appid), pts in points.items():
-        baseline = None
-        in_period = []
-        for d, val in pts:
-            if d < start_date:
-                baseline = val
-            elif d <= end_date:
-                in_period.append((d, val))
+
+    for (user_id, appid), pts in series.items():
+        if not pts:
+            continue
+
+        # последний снимок в периоде (date <= end_date, date >= start_date предпочтительно)
+        in_period = [(d, v) for d, v in pts if start_date <= d <= end_date]
+        before = [(d, v) for d, v in pts if d < start_date]
+
         if not in_period:
             continue
 
         latest_val = in_period[-1][1]
-        if baseline is not None:
 
-            base_val = baseline
+        if before:
+            base_val = before[-1][1]  # последний снимок ДО периода
         else:
+            # нет истории до периода → берём первый снимок внутри периода
+            # дельта только если есть 2+ точки внутри периода
+            if len(in_period) >= 2:
+                base_val = in_period[0][1]
+            else:
+                # один снимок и нет baseline — НЕ считаем весь forever за "сегодня/неделю"
+                continue
 
-            base_val = in_period[0][1]
+        delta = latest_val - base_val
+        if delta > 0:
+            result[user_id] += delta
 
-        result[user_id] += max(latest_val - base_val, 0)
-
-    return result
+    return dict(result)
 
 def get_clan_dashboard(clan: Clan):
     today = dj_timezone.now().date()

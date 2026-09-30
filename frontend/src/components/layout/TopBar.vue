@@ -4,11 +4,9 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import IconSearch from '../icons/IconSearch.vue'
 import api from '../../api/axios'
-import { useToast } from '../../composables/useToast'
 
 const authStore = useAuthStore()
 const router = useRouter()
-const toast = useToast()
 
 const menuOpen = ref(false)
 const menuRef = ref(null)
@@ -43,9 +41,7 @@ async function markRead(ids = null) {
     } else {
       notifications.value = notifications.value.map((n) => ({ ...n, read: true }))
     }
-  } catch {
-    /* silent */
-  }
+  } catch { /* */ }
 }
 
 async function openNotifItem(n) {
@@ -111,9 +107,7 @@ function pickPlayer(u) {
 }
 
 function onSearchBlur() {
-  setTimeout(() => {
-    suggestOpen.value = false
-  }, 150)
+  setTimeout(() => { suggestOpen.value = false }, 150)
 }
 
 function timeAgo(iso) {
@@ -174,7 +168,6 @@ onUnmounted(() => {
     </form>
 
     <div class="top-right">
-      <!-- Уведомления -->
       <div class="notif-wrap" ref="notifRef">
         <button type="button" class="bell-btn" @click.stop="toggleNotif" title="Уведомления">
           <span class="bell-icon">🔔</span>
@@ -185,12 +178,7 @@ onUnmounted(() => {
           <div class="notif-panel" v-if="notifOpen">
             <div class="notif-head">
               <span>Уведомления</span>
-              <button
-                v-if="unread"
-                type="button"
-                class="mark-all"
-                @click="markRead()"
-              >
+              <button v-if="unread" type="button" class="mark-all" @click="markRead()">
                 Прочитать все
               </button>
             </div>
@@ -215,7 +203,6 @@ onUnmounted(() => {
         </transition>
       </div>
 
-      <!-- Профиль -->
       <div class="user-block" ref="menuRef">
         <button type="button" class="user-trigger" @click.stop="toggleMenu">
           <div
@@ -247,17 +234,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.search-icon svg { width: 15px; height: 15px; }
-
 .topbar {
-  height: 68px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(10, 12, 16, 0.6);
-  backdrop-filter: blur(12px);
+  background: var(--bg-primary);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -268,56 +252,74 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  width: 340px;
-  max-width: 42vw;
+  width: 360px;
+  max-width: 46vw;
 }
 .search-icon {
   position: absolute;
-  left: 14px;
+  left: 12px;
   color: var(--text-muted);
   pointer-events: none;
   z-index: 1;
+  display: flex;
 }
+.search-icon svg { width: 15px; height: 15px; }
 .search input {
   width: 100%;
-  background: var(--bg-card);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 10px 14px 10px 38px;
+  padding: 8px 12px 8px 36px;
   color: var(--text-primary);
   font-size: 13px;
 }
 .search input:focus {
   outline: none;
   border-color: var(--accent);
-  background: var(--bg-card-hover);
 }
 
 .suggest-box {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0; right: 0;
+  left: 0;
+  right: 0;
   z-index: 60;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-md);
 }
 .suggest-item {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 10px 14px; background: none; border: none; cursor: pointer;
-  color: inherit; text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
 }
 .suggest-item:hover { background: var(--bg-card-hover); }
 .suggest-av {
-  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
-  background-color: var(--accent-dim); background-size: cover; background-position: center;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: var(--accent);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background-color: var(--accent-dim);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
 }
 .suggest-text { display: flex; flex-direction: column; min-width: 0; }
-.suggest-name { font-size: 13px; font-weight: 700; }
+.suggest-name { font-size: 13px; font-weight: 600; }
 .suggest-user { font-size: 11px; color: var(--text-secondary); }
 
 .top-right {
@@ -330,30 +332,36 @@ onUnmounted(() => {
 .notif-wrap { position: relative; }
 .bell-btn {
   position: relative;
-  width: 40px; height: 40px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: border-color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .bell-btn:hover {
   border-color: var(--border-hover);
   background: var(--bg-card-hover);
 }
-.bell-icon { font-size: 16px; line-height: 1; }
+.bell-icon { font-size: 15px; line-height: 1; }
 .bell-badge {
   position: absolute;
-  top: -4px; right: -4px;
-  min-width: 18px; height: 18px;
-  padding: 0 5px;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: #12100c;
   font-size: 10px;
-  font-weight: 800;
-  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   box-shadow: 0 0 0 2px var(--bg-primary);
 }
 
@@ -367,8 +375,8 @@ onUnmounted(() => {
   flex-direction: column;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   z-index: 70;
 }
@@ -379,14 +387,14 @@ onUnmounted(() => {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .mark-all {
   border: none;
   background: none;
   color: var(--accent);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 .notif-list {
@@ -404,13 +412,9 @@ onUnmounted(() => {
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s;
 }
 .notif-item:hover { background: var(--bg-card-hover); }
-.notif-item.unread {
-  background: rgba(230, 57, 70, 0.06);
-}
-.notif-item.unread b { color: var(--text-primary); }
+.notif-item.unread { background: var(--accent-dim); }
 .notif-body {
   flex: 1;
   min-width: 0;
@@ -418,10 +422,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 3px;
 }
-.notif-body b {
-  font-size: 13px;
-  font-weight: 700;
-}
+.notif-body b { font-size: 13px; font-weight: 600; }
 .notif-body span {
   font-size: 12px;
   color: var(--text-secondary);
@@ -442,45 +443,104 @@ onUnmounted(() => {
 
 .user-block { position: relative; }
 .user-trigger {
-  display: flex; align-items: center; gap: 10px;
-  background: transparent; border: none; cursor: pointer;
-  padding: 6px 10px 6px 6px; border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--radius-sm);
 }
 .user-trigger:hover { background: var(--bg-card-hover); }
 .avatar {
-  width: 36px; height: 36px; border-radius: 50%;
-  background-color: var(--accent-dim); background-size: cover; background-position: center;
-  border: 2px solid var(--accent); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background-color: var(--accent-dim);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.avatar-fallback { font-weight: 700; font-size: 14px; color: var(--accent); }
+.avatar-fallback {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+}
 .username {
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
-  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.chevron { color: var(--text-secondary); font-size: 12px; transition: transform 0.2s; }
+.chevron {
+  color: var(--text-secondary);
+  font-size: 12px;
+  transition: transform 0.15s;
+}
 .chevron.open { transform: rotate(180deg); }
 
 .dropdown {
-  position: absolute; top: calc(100% + 8px); right: 0; min-width: 180px;
-  background: var(--bg-card); border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm); box-shadow: 0 12px 40px rgba(0,0,0,0.4);
-  padding: 6px; display: flex; flex-direction: column; gap: 2px; z-index: 70;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 70;
 }
 .dropdown-item {
-  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
-  color: var(--text-primary); text-decoration: none; font-size: 13px; font-weight: 500;
-  background: none; border: none; cursor: pointer; width: 100%; text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
 }
 .dropdown-item:hover { background: var(--bg-card-hover); }
-.dropdown-item.danger:hover { background: rgba(248, 113, 113, 0.1); color: var(--danger); }
-.dropdown-icon { width: 16px; text-align: center; color: var(--text-secondary); }
-.dropdown-divider { height: 1px; background: var(--border-color); margin: 4px 2px; }
+.dropdown-item.danger:hover {
+  background: rgba(201, 122, 114, 0.12);
+  color: var(--danger);
+}
+.dropdown-icon {
+  width: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 2px;
+}
 
-.menu-fade-enter-active, .menu-fade-leave-active {
+.menu-fade-enter-active,
+.menu-fade-leave-active {
   transition: opacity 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.menu-fade-enter-from, .menu-fade-leave-to {
-  opacity: 0; transform: translateY(-6px);
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>
