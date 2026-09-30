@@ -54,7 +54,8 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "https://gamehub-gh6j.onrender.com", 
+    "https://gamehub-gh6j.onrender.com",
+
 ]
 CORS_ALLOW_CREDENTIALS = True
 
@@ -64,7 +65,12 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "https://gamehub-gh6j.onrender.com",
 ]
-CSRF_COOKIE_SAMESITE = 'Lax'
+
+CSRF_COOKIE_SAMESITE = 'Lax' if DEBUG else 'None'
+SESSION_COOKIE_SAMESITE = 'Lax' if DEBUG else 'None'
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 AUTHENTICATION_BACKENDS = (
     'social_core.backends.steam.SteamOpenId',
