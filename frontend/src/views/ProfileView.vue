@@ -128,6 +128,7 @@ async function handleSync(id) {
         next.delete(id)
         syncingIds.value = next
         toast.success('Синхронизация завершена')
+        await loadAccounts()
         loadProgress()
       } else if (res.data.status === 'error') {
         clearInterval(poll)
@@ -191,18 +192,22 @@ function steamGamesFlat() {
   for (const acc of accounts.value) {
     if (acc.platform !== 'steam') continue
     for (const s of acc.snapshots || []) {
+      const day = String(s.date).slice(0, 10)
       if (!map[s.appid]) map[s.appid] = { name: s.game_name, byDate: {} }
-      map[s.appid].byDate[s.date] = s.playtime_forever || 0
-      if (!map[s.appid].latestDate || s.date > map[s.appid].latestDate) {
-        map[s.appid].latestDate = s.date
-        map[s.appid].name = s.game_name
-        map[s.appid].latestMinutes = s.playtime_forever || 0
+      map[s.appid].byDate[day] = Number(s.playtime_forever) || 0
+      if (!map[s.appid].latestDate || day > map[s.appid].latestDate) {
+        map[s.appid].latestDate = day
+        map[s.appid].name = s.game_name || map[s.appid].name
+        map[s.appid].latestMinutes = Number(s.playtime_forever) || 0
       }
     }
   }
 
+  const pad = (n) => String(n).padStart(2, '0')
+  const isoLocal = (d) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+
   const today = new Date()
-  const iso = (d) => d.toISOString().slice(0, 10)
   const weekAgo = new Date(today)
   weekAgo.setDate(weekAgo.getDate() - 7)
   const monthAgo = new Date(today)
@@ -210,15 +215,25 @@ function steamGamesFlat() {
 
   function deltaSince(byDate, sinceDate) {
     const dates = Object.keys(byDate).sort()
-    if (!dates.length) return null
+    if (dates.length < 2) return null
+
+    const since = isoLocal(sinceDate)
     const latest = dates[dates.length - 1]
-    let baseline = null
+    const latestVal = byDate[latest] || 0
+
+    let baseVal = null
     for (const d of dates) {
-      if (d < iso(sinceDate)) baseline = byDate[d]
-      else break
+      if (d < since) baseVal = byDate[d]
     }
-    if (baseline == null) baseline = byDate[dates[0]]
-    return Math.max((byDate[latest] || 0) - baseline, 0)
+
+    if (baseVal == null) {
+      const inWindow = dates.filter((d) => d >= since)
+      if (inWindow.length < 2) return null
+      baseVal = byDate[inWindow[0]]
+    }
+
+    const delta = latestVal - baseVal
+    return delta > 0 ? delta : 0
   }
 
   return Object.entries(map)
@@ -247,21 +262,29 @@ onMounted(() => {
       ></div>
       <div class="header-main">
         <h1>{{ authStore.user?.display_name || authStore.user?.username }}</h1>
-        <p class="steam-id" v-if="authStore.user?.steam_id">Steam ID: {{ authStore.user.steam_id }}</p>
+        <p class="steam-id" v-if="authStore.user?.steam_id">
+          Steam ID: {{ authStore.user.steam_id }}
+        </p>
 
         <div class="gh-block" v-if="progress">
           <div class="gh-row">
             <span class="gh-lvl">GH {{ progress.level }}</span>
             <div class="gh-bar"><i :style="{ width: (progress.pct || 0) + '%' }" /></div>
-            <span class="gh-xp">{{ progress.xp_into_level ?? 0 }}/{{ progress.xp_per_level ?? 100 }} XP</span>
+            <span class="gh-xp">
+              {{ progress.xp_into_level ?? 0 }}/{{ progress.xp_per_level ?? 100 }} XP
+            </span>
           </div>
           <div class="gh-meta">
             <span class="gh-tag" v-for="t in (progress.tags || [])" :key="t">{{ t }}</span>
-            <span class="gh-boost" v-if="progress.boost_credits">Бусты: {{ progress.boost_credits }}</span>
+            <span class="gh-boost" v-if="progress.boost_credits">
+              Бусты: {{ progress.boost_credits }}
+            </span>
           </div>
           <div class="gh-ref" v-if="progress.referral_code">
             <span>Твой код:</span>
-            <code class="ref-code" @click="copyRefCode" title="Скопировать">{{ progress.referral_code }}</code>
+            <code class="ref-code" @click="copyRefCode" title="Скопировать">
+              {{ progress.referral_code }}
+            </code>
           </div>
           <div class="gh-ref-claim" v-if="!progress.has_referrer">
             <input v-model="refCodeInput" placeholder="Код друга" maxlength="16" />
@@ -275,14 +298,18 @@ onMounted(() => {
 
     <div class="section-header">
       <h2>Подключённые аккаунты</h2>
-      <button class="btn-primary" type="button" @click="showConnectModal = true">+ Подключить аккаунт</button>
+      <button class="btn-primary" type="button" @click="showConnectModal = true">
+        + Подключить аккаунт
+      </button>
     </div>
 
     <div v-if="loading" class="state-message">Загружаем аккаунты...</div>
     <div v-else-if="error" class="state-message error-state">{{ error }}</div>
     <div v-else-if="accounts.length === 0" class="state-message empty-state">
       <p>Пока нет подключённых аккаунтов.</p>
-      <button class="btn-primary" type="button" @click="showConnectModal = true">Подключить первый аккаунт</button>
+      <button class="btn-primary" type="button" @click="showConnectModal = true">
+        Подключить первый аккаунт
+      </button>
     </div>
 
     <template v-else>
@@ -300,7 +327,14 @@ onMounted(() => {
           >
             {{ syncingIds.has(acc.id) ? '…' : '↻' }}
           </button>
-          <button class="icon-btn danger" type="button" @click="handleRemove(acc.id)" title="Отключить">✕</button>
+          <button
+            class="icon-btn danger"
+            type="button"
+            @click="handleRemove(acc.id)"
+            title="Отключить"
+          >
+            ✕
+          </button>
         </div>
       </div>
 
@@ -314,7 +348,11 @@ onMounted(() => {
             :class="{ active: activeAccount?.id === acc.id }"
             @click="activeStatsTab = acc.id"
           >
-            {{ acc.display_stats?.game_label || platformLabels[acc.platform] || acc.platform }}
+            {{
+              acc.display_stats?.game_label ||
+              platformLabels[acc.platform] ||
+              acc.platform
+            }}
           </button>
         </div>
 
@@ -325,7 +363,9 @@ onMounted(() => {
           @open-match="openMatch"
         />
         <div v-else class="empty-hint">
-          Нажми ↻ на {{ platformLabels[activeAccount?.platform] || 'аккаунт' }}, чтобы подтянуть статистику
+          Нажми ↻ на
+          {{ platformLabels[activeAccount?.platform] || 'аккаунт' }}, чтобы
+          подтянуть статистику
         </div>
       </div>
 
@@ -343,18 +383,24 @@ onMounted(() => {
           <tbody>
             <tr v-for="row in steamGamesFlat()" :key="row.appid">
               <td class="game-cell">{{ row.game_name }}</td>
-              <td class="hours-cell">{{ Math.round(row.playtime_forever / 60) }}ч</td>
+              <td class="hours-cell">
+                {{ Math.round(row.playtime_forever / 60) }}ч
+              </td>
               <td class="today-cell">
                 <span v-if="row.week_minutes != null && row.week_minutes > 0">
                   +{{ Math.round(row.week_minutes / 60) }}ч
                 </span>
-                <span v-else class="muted">—</span>
+                <span v-else class="muted" title="Нужно минимум 2 дня синка Steam"
+                  >—</span
+                >
               </td>
               <td class="today-cell">
                 <span v-if="row.month_minutes != null && row.month_minutes > 0">
                   +{{ Math.round(row.month_minutes / 60) }}ч
                 </span>
-                <span v-else class="muted">—</span>
+                <span v-else class="muted" title="Нужно минимум 2 дня синка Steam"
+                  >—</span
+                >
               </td>
             </tr>
           </tbody>
@@ -386,38 +432,42 @@ onMounted(() => {
 .profile-page {
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  animation: fadeInUp 0.35s var(--ease) both;
+  gap: 18px;
+  width: 100%;
+  animation: fadeInUp 0.25s var(--ease) both;
 }
+
 .profile-header {
   display: flex;
   align-items: flex-start;
-  gap: 18px;
-  padding: 22px 24px !important;
+  gap: 16px;
+  padding: 18px 20px !important;
+  width: 100%;
 }
 .avatar-big {
-  width: 76px;
-  height: 76px;
-  border-radius: 50%;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
   background: var(--accent-dim);
   background-size: cover;
   background-position: center;
-  border: 2px solid rgba(230, 57, 70, 0.55);
-  box-shadow: 0 0 0 4px rgba(230, 57, 70, 0.12);
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
-.header-main { min-width: 0; flex: 1; }
+.header-main {
+  min-width: 0;
+  flex: 1;
+}
 .profile-header h1 {
   margin: 0 0 4px;
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-size: 22px;
+  font-weight: 600;
 }
 .steam-id {
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
 
 .gh-block {
@@ -433,33 +483,34 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .gh-lvl {
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--accent);
   background: var(--accent-dim);
-  padding: 3px 10px;
-  border-radius: 999px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
 }
 .gh-bar {
   flex: 1;
   min-width: 100px;
-  max-width: 200px;
-  height: 8px;
-  border-radius: 99px;
-  background: var(--bg-primary);
+  max-width: 220px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
   overflow: hidden;
 }
 .gh-bar i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #ff6b7a);
-  border-radius: 99px;
-  transition: width 0.3s ease;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.25s ease;
 }
 .gh-xp {
   font-size: 11px;
   color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
 .gh-meta {
   display: flex;
@@ -469,9 +520,9 @@ onMounted(() => {
 .gh-tag,
 .gh-boost {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card-hover);
   color: var(--text-secondary);
 }
@@ -483,12 +534,14 @@ onMounted(() => {
   align-items: center;
 }
 .ref-code {
-  font-weight: 800;
+  font-weight: 700;
   color: var(--accent);
   cursor: pointer;
   background: var(--accent-dim);
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .gh-ref-claim {
   display: flex;
@@ -499,18 +552,14 @@ onMounted(() => {
 .gh-ref-claim input {
   width: 130px;
   font-size: 12px;
-  padding: 7px 10px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-primary);
+  padding: 6px 10px;
 }
 .btn-ref {
   background: var(--bg-card-hover);
   border: 1px solid var(--border-color);
   color: var(--text-primary);
-  padding: 7px 12px;
-  border-radius: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -525,18 +574,11 @@ onMounted(() => {
 }
 .section-header h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-}
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  padding: 10px 16px;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  cursor: pointer;
   font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
 }
 
 .platforms-row {
@@ -550,10 +592,10 @@ onMounted(() => {
   gap: 8px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 999px;
-  padding: 6px 10px 6px 12px;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
 }
-.platform-label { font-weight: 700; font-size: 12px; }
+.platform-label { font-weight: 600; font-size: 12px; }
 .chip-nick {
   font-size: 11px;
   color: var(--text-secondary);
@@ -570,15 +612,14 @@ onMounted(() => {
 }
 .verified-dot.ok {
   background: var(--success);
-  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
 }
 .icon-btn {
-  background: var(--bg-card-hover);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
   width: 26px;
   height: 26px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 12px;
   display: inline-flex;
@@ -594,24 +635,25 @@ onMounted(() => {
 .stats-switcher-card {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px 20px !important;
+  gap: 16px;
+  padding: 16px 18px !important;
+  width: 100%;
 }
 .stats-tabs {
   display: flex;
   gap: 4px;
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 14px;
+  padding-bottom: 12px;
   flex-wrap: wrap;
 }
 .stats-tab {
   background: none;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 700;
-  padding: 7px 14px;
-  border-radius: 999px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .stats-tab:hover {
@@ -621,42 +663,65 @@ onMounted(() => {
 .stats-tab.active {
   background: var(--accent-dim);
   color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(230, 57, 70, 0.25);
+  border-color: rgba(196, 165, 116, 0.35);
 }
 .empty-hint {
   color: var(--text-secondary);
   font-size: 13px;
   text-align: center;
-  padding: 28px 12px;
+  padding: 24px 12px;
 }
 
-.card-title { margin: 0 0 14px; font-size: 14px; font-weight: 700; }
-.table-title { padding: 16px 16px 0; }
-.games-table-card { padding: 0 !important; overflow: hidden; }
-.games-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.card-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.table-title { padding: 14px 16px 0; }
+.games-table-card {
+  padding: 0 !important;
+  overflow: hidden;
+  width: 100%;
+}
+.games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
 .games-table th {
   text-align: left;
-  padding: 12px 16px;
+  padding: 10px 16px;
   color: var(--text-muted);
-  font-weight: 700;
+  font-weight: 600;
   border-bottom: 1px solid var(--border-color);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 .games-table td {
-  padding: 12px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-color);
 }
 .games-table tr:last-child td { border-bottom: none; }
 .games-table tbody tr:hover { background: var(--bg-card-hover); }
-.game-cell { font-weight: 600; }
-.hours-cell { font-weight: 700; font-variant-numeric: tabular-nums; }
-.today-cell { color: var(--success); font-size: 12px; }
+.game-cell { font-weight: 500; }
+.hours-cell {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.today-cell {
+  color: var(--success);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
 .muted { color: var(--text-muted); }
 
 .state-message {
-  padding: 56px 20px;
+  padding: 48px 20px;
   text-align: center;
   color: var(--text-secondary);
   background: var(--bg-card);
@@ -667,7 +732,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 .error-state { color: var(--danger); }
 </style>

@@ -25,7 +25,7 @@ const logoInput = ref(null)
 const roleLabels = { leader: 'Лидер', officer: 'Офицер', member: 'Участник' }
 
 const filteredClans = computed(() =>
-  clans.value.filter(c => c.name.toLowerCase().includes(searchQuery.value.toLowerCase()))
+  clans.value.filter((c) => c.name.toLowerCase().includes(searchQuery.value.toLowerCase()))
 )
 
 function isLeader(clan) {
@@ -111,7 +111,7 @@ async function onLogoSelected(e) {
       logo_url: url,
       logo: url,
     }
-    const idx = clans.value.findIndex(c => c.id === selectedClan.value.id)
+    const idx = clans.value.findIndex((c) => c.id === selectedClan.value.id)
     if (idx !== -1) {
       clans.value[idx] = { ...clans.value[idx], logo_url: url, logo: url }
     }
@@ -138,8 +138,12 @@ onMounted(loadClans)
         <p class="subtitle">Создавай или вступай — следи за активностью команды</p>
       </div>
       <div class="header-actions">
-        <button class="btn-secondary" @click="showJoinModal = true">Вступить по коду</button>
-        <button class="btn-primary" @click="showCreateModal = true">+ Создать клан</button>
+        <button type="button" class="btn-secondary" @click="showJoinModal = true">
+          Вступить по коду
+        </button>
+        <button type="button" class="btn-primary" @click="showCreateModal = true">
+          + Создать клан
+        </button>
       </div>
     </div>
 
@@ -156,14 +160,18 @@ onMounted(loadClans)
     <div v-else-if="clans.length === 0" class="state-message empty-state">
       <p>Ты пока не состоишь ни в одном клане.</p>
       <div class="header-actions">
-        <button class="btn-secondary" @click="showJoinModal = true">Вступить по коду</button>
-        <button class="btn-primary" @click="showCreateModal = true">Создать первый клан</button>
+        <button type="button" class="btn-secondary" @click="showJoinModal = true">
+          Вступить по коду
+        </button>
+        <button type="button" class="btn-primary" @click="showCreateModal = true">
+          Создать первый клан
+        </button>
       </div>
     </div>
 
     <div v-else-if="filteredClans.length === 0" class="state-message empty-state">
       <p>Ничего не найдено по запросу «{{ searchQuery }}»</p>
-      <button class="btn-secondary" @click="searchQuery = ''">Сбросить поиск</button>
+      <button type="button" class="btn-secondary" @click="searchQuery = ''">Сбросить поиск</button>
     </div>
 
     <div v-else class="clans-grid">
@@ -174,7 +182,7 @@ onMounted(loadClans)
         @click="openClan(clan)"
       >
         <div class="clan-card-top">
-          <ClanIcon :clan="clan" :size="52" />
+          <ClanIcon :clan="clan" :size="48" />
           <div class="clan-card-title-block">
             <h3>{{ clan.name }}</h3>
             <span class="my-role-badge" :class="clan.my_role" v-if="clan.my_role">
@@ -195,13 +203,13 @@ onMounted(loadClans)
           v-if="clan.invite_code"
           @click.stop="copyInviteCode(clan.invite_code)"
         >
-          <span class="invite-label">Код приглашения:</span>
+          <span class="invite-label">Код:</span>
           <span class="invite-code">{{ clan.invite_code }}</span>
-          <span class="copy-hint">нажми, чтобы скопировать</span>
+          <span class="copy-hint">копировать</span>
         </div>
         <div class="member-badge" v-else-if="clan.is_member">
           <span class="member-icon">✓</span>
-          <span>Ты участник этого клана</span>
+          <span>Ты в этом клане</span>
         </div>
       </div>
     </div>
@@ -227,13 +235,13 @@ onMounted(loadClans)
                   title="Сменить аватар"
                   @click="triggerLogoPick"
                 >
-                  {{ logoUploading ? '…' : '📷' }}
+                  {{ logoUploading ? '…' : '✎' }}
                 </button>
               </template>
             </div>
             <h2>{{ selectedClan.name }} — активность</h2>
           </div>
-          <button class="close-btn" @click="closeDashboard">✕</button>
+          <button type="button" class="close-btn" @click="closeDashboard">✕</button>
         </div>
 
         <div v-if="dashboardLoading" class="state-message">Считаем активность...</div>
@@ -248,77 +256,270 @@ onMounted(loadClans)
       </div>
     </div>
 
-    <CreateClanModal v-if="showCreateModal" @close="showCreateModal = false" @created="onClanCreated" />
-    <JoinClanModal v-if="showJoinModal" @close="showJoinModal = false" @joined="onJoined" />
+    <CreateClanModal
+      v-if="showCreateModal"
+      @close="showCreateModal = false"
+      @created="onClanCreated"
+    />
+    <JoinClanModal
+      v-if="showJoinModal"
+      @close="showJoinModal = false"
+      @joined="onJoined"
+    />
   </div>
 </template>
 
 <style scoped>
-.clans-page { display: flex; flex-direction: column; gap: 20px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.page-header h1 { margin: 0 0 4px; font-size: 24px; }
-.subtitle { margin: 0; color: var(--text-secondary); font-size: 14px; }
-.header-actions { display: flex; gap: 10px; }
+.clans-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+}
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+}
+.subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 
 .clan-search {
-  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm);
-  padding: 10px 14px; color: var(--text-primary); font-size: 13px; width: 100%; max-width: 320px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  width: 100%;
+  max-width: 320px;
 }
-.clan-search:focus { outline: none; border-color: var(--accent); }
 
-.clans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.clans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
 
-.clan-card { display: flex; flex-direction: column; gap: 12px; }
+.clan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clan-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.clan-card-title-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.clan-card-title-block h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-.clan-card-top { display: flex; align-items: center; gap: 12px; }
-.clan-card-title-block { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.clan-card-title-block h3 { margin: 0; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.my-role-badge {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.my-role-badge.leader {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.my-role-badge.officer {
+  background: rgba(106, 170, 124, 0.12);
+  color: var(--success);
+}
+.my-role-badge.member {
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+}
 
-.my-role-badge { align-self: flex-start; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; }
-.my-role-badge.leader { background: var(--accent-dim); color: var(--accent); }
-.my-role-badge.officer { background: rgba(74, 222, 128, 0.12); color: var(--success); }
-.my-role-badge.member { background: var(--bg-card-hover); color: var(--text-secondary); }
+.members-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-sunken);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
 
-.members-badge { font-size: 12px; font-weight: 700; color: var(--text-secondary); background: var(--bg-card-hover); padding: 4px 10px; border-radius: 20px; flex-shrink: 0; }
+.clan-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  min-height: 28px;
+  line-height: 1.4;
+}
 
-.clan-description { font-size: 13px; color: var(--text-secondary); margin: 0; min-height: 32px; line-height: 1.4; }
+.activity-bar {
+  height: 3px;
+  background: var(--bg-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.activity-fill {
+  height: 100%;
+  background: var(--accent);
+}
 
-.activity-bar { height: 4px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; }
-.activity-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-hover)); }
-
-.invite-row { display: flex; align-items: center; gap: 8px; padding: 10px; background: var(--bg-primary); border-radius: var(--radius-sm); font-size: 12px; }
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+}
 .invite-label { color: var(--text-secondary); }
-.invite-code { font-family: monospace; font-weight: 700; color: var(--accent); }
-.copy-hint { margin-left: auto; color: var(--text-secondary); font-size: 11px; }
+.invite-code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+}
+.copy-hint {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
 .member-badge {
-  padding: 10px; background: linear-gradient(135deg, var(--accent-dim), rgba(230, 57, 70, 0.05));
-  border: 1px solid var(--accent); border-radius: var(--radius-sm); font-size: 12px; color: var(--accent);
-  text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600;
+  padding: 8px 10px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(196, 165, 116, 0.35);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--accent);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 600;
 }
-.member-icon { width: 16px; height: 16px; background: var(--accent); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.member-icon {
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  color: #12100c;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
 
-.state-message { padding: 60px 20px; text-align: center; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.state-message {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
 .error-state { color: var(--danger); }
 
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.dashboard-modal { width: 820px; max-width: 92vw; max-height: 80vh; overflow-y: auto; }
-.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.modal-header-title { display: flex; align-items: center; gap: 12px; }
-.modal-header h2 { margin: 0; font-size: 18px; }
-.close-btn { background: none; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; }
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.dashboard-modal {
+  width: 820px;
+  max-width: 92vw;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.modal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+}
 
-.logo-wrap { position: relative; display: inline-flex; }
+.logo-wrap {
+  position: relative;
+  display: inline-flex;
+}
 .logo-file-input { display: none; }
 .logo-edit-btn {
-  position: absolute; right: -6px; bottom: -6px;
-  width: 22px; height: 22px; border-radius: 50%;
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
   border: 1px solid var(--border-color);
-  background: var(--bg-card); cursor: pointer; font-size: 11px;
-  display: flex; align-items: center; justify-content: center;
-  padding: 0; line-height: 1;
+  background: var(--bg-card);
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  color: var(--text-secondary);
 }
-.logo-edit-btn:hover { border-color: var(--accent); }
+.logo-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
 .logo-edit-btn:disabled { opacity: 0.6; cursor: wait; }
 </style>

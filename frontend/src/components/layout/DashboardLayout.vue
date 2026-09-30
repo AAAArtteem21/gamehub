@@ -22,25 +22,20 @@ import ToastHost from '../ui/ToastHost.vue'
 </template>
 
 <style scoped>
-.page-enter-active, .page-leave-active {
-  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
-}
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-.page-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
 .layout {
   display: flex;
+  min-height: 100vh;
 }
 .main {
-  margin-left: 240px;
-  width: calc(100% - 240px);
+  margin-left: var(--sidebar-w);
+  width: calc(100% - var(--sidebar-w));
+  min-width: 0;
+  flex: 1;
 }
 .content {
-  padding: 24px;
+  padding: 20px 24px 40px;
+  width: 100%;
+  max-width: none; /* ← убрать потолок */
+  box-sizing: border-box;
 }
 </style>

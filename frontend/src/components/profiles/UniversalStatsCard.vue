@@ -25,10 +25,11 @@ const matchGame = computed(() => {
 })
 
 const hasMatchHistory = computed(
-  () => Array.isArray(props.stats?.match_history) && props.stats.match_history.length > 0
+  () =>
+    Array.isArray(props.stats?.match_history) &&
+    props.stats.match_history.length > 0
 )
 
-/** Только метрики с реальным value */
 const metrics = computed(() =>
   (props.stats?.metrics || []).filter(
     (m) => m && m.value !== undefined && m.value !== null && m.value !== ''
@@ -63,7 +64,9 @@ function closeMatch() {
           class="tag-pill"
           v-for="(t, i) in (stats.tags || []).filter(Boolean)"
           :key="i"
-        >{{ t.label }}</span>
+        >
+          {{ t.label }}
+        </span>
       </div>
 
       <MatchHistoryTable
@@ -109,59 +112,64 @@ function closeMatch() {
 .universal-stats {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
+  width: 100%;
 }
 
 .stats-row {
   display: grid;
   width: 100%;
-  gap: 10px;
-  /* 2–6 метрик равномерно на всю ширину */
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
 
 .stat-box {
   width: 100%;
-  min-height: 78px;
+  min-height: 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 14px 10px;
-  background: var(--bg-primary);
+  padding: 12px 8px;
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
 }
 .stat-box:hover {
   border-color: var(--border-hover);
-  background: var(--bg-card-hover);
 }
 
 .stat-value {
-  font-size: 20px;
-  font-weight: 800;
+  font-size: 18px;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
-.stat-value.win { color: var(--success); }
-.stat-value.loss { color: var(--danger); }
-.stat-value.accent { color: var(--accent); }
+.stat-value.win {
+  color: var(--success);
+}
+.stat-value.loss {
+  color: var(--danger);
+}
+.stat-value.accent {
+  color: var(--accent);
+}
 
 .stat-label {
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-align: center;
 }
 
 .badges-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   align-items: center;
 }
@@ -169,48 +177,60 @@ function closeMatch() {
 .rank-badge {
   background: var(--accent-dim);
   color: var(--accent);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 11px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(196, 165, 116, 0.25);
+  letter-spacing: 0.02em;
 }
 
 .tag-pill {
-  background: var(--bg-card-hover);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
   font-weight: 600;
   font-size: 11px;
-  padding: 4px 11px;
-  border-radius: 999px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
 }
 
 .list-section h4 {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
 
 .list-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
 }
-.list-row:last-child { border-bottom: none; }
+.list-row:last-child {
+  border-bottom: none;
+}
 
-.item-name { flex: 1; font-weight: 600; }
-.item-sub { font-size: 12px; color: var(--text-secondary); }
+.item-name {
+  flex: 1;
+  font-weight: 500;
+}
+.item-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
 .item-value {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
-.item-value.good { color: var(--success); }
+.item-value.good {
+  color: var(--success);
+}
 </style>
