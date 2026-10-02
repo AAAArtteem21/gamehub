@@ -16,6 +16,7 @@ from .models import UserProfile,Notification
 from .serializers import UserProfileSerializer
 from django.middleware.csrf import get_token
 from django.http import HttpResponse
+from django.conf import settings
 
 @ensure_csrf_cookie
 def get_csrf_token(request):
@@ -53,8 +54,6 @@ class SteamAuthCompleteView(APIView):
     def get(self, request):
         user = get_user(request)
 
-        print(user)
-
         if not user.is_authenticated:
             return Response(
                 {"detail": "Пользователь не найден"},
@@ -64,7 +63,7 @@ class SteamAuthCompleteView(APIView):
         token, _ = Token.objects.get_or_create(user=user)
 
         return redirect(
-            f"http://localhost:5173/auth/callback?token={token.key}"
+            f"{settings.FRONTEND_URL}/auth/callback?token={token.key}"
         )
     
 class SteamAuthErrorView(APIView):

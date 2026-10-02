@@ -65,7 +65,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "https://gamehub-gh6j.onrender.com",
 ]
-
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 CSRF_COOKIE_SAMESITE = 'Lax' if DEBUG else 'None'
 SESSION_COOKIE_SAMESITE = 'Lax' if DEBUG else 'None'
 CSRF_COOKIE_SECURE = not DEBUG
