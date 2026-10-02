@@ -4,11 +4,11 @@ import router from '../router'
 import { useAuthStore } from '../stores/auth'
 
 const api = axios.create({
-  baseURL: 'https://gameeyes.onrender.com/',
+  baseURL: 'https://gameeyes.onrender.com/api/',
   withCredentials: true,
   xsrfCookieName: 'csrftoken',
   xsrfHeaderName: 'X-CSRFToken',
-  withXSRFToken: true,   // ← вот это ключевое, без него заголовок не прикладывается на другой origin
+  withXSRFToken: true,
 })
 
 api.interceptors.response.use(
