@@ -154,7 +154,7 @@ class PublicProfileView(APIView):
             return Response({"detail": "Игрок не найден"}, status=404)
 
         views_count = ProfileViewModel.objects.filter(viewed_user=user).count()
-        if request.user.id != user.id:
+        if request.user.is_authenticated and request.user.id != user.id:
             ProfileViewModel.objects.create(viewer=request.user, viewed_user=user)
             views_count += 1
 

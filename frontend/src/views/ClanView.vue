@@ -6,6 +6,9 @@ import CreateClanModal from '../components/clans/CreateClanModal.vue'
 import JoinClanModal from '../components/clans/JoinClanModal.vue'
 import ClanDashboardTable from '../components/clans/ClanDashboardTable.vue'
 import ClanIcon from '../components/clans/ClanIcon.vue'
+import { useAuthStore } from '../stores/auth'
+const auth = useAuthStore()
+
 
 const clans = ref([])
 const loading = ref(true)
@@ -32,6 +35,13 @@ function isLeader(clan) {
   return clan?.my_role === 'leader' || (clan?.invite_code != null && clan.invite_code !== '')
 }
 
+function openCreate() {
+  if (auth.requireAuth('Войди через Steam, чтобы создать клан.')) showCreateModal.value = true
+}
+function openJoin() {
+  if (auth.requireAuth('Войди через Steam, чтобы вступить в клан.')) showJoinModal.value = true
+}
+
 async function loadClans() {
   loading.value = true
   error.value = null
@@ -46,6 +56,7 @@ async function loadClans() {
 }
 
 async function openClan(clan) {
+  if (!auth.requireAuth('Войди через Steam, чтобы смотреть активность клана.')) return
   selectedClan.value = clan
   dashboard.value = []
   dashboardError.value = null

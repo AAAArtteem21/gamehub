@@ -3,22 +3,23 @@ import { onMounted } from 'vue'
 import api from './api/axios'
 import { useAuthStore } from './stores/auth'
 import { useChatStore } from './stores/chat'
+import LoginPromptModal from './components/LoginPromptModal.vue'
 
 const chatStore = useChatStore()
 const authStore = useAuthStore()
 
-onMounted(async () => {
+onMounted(() => {
   document.addEventListener('click', () => chatStore.unlockAudio?.(), { once: true })
-  await api.get('csrf/')  // гарантируем что csrftoken cookie установлена
-  if (authStore.isAuthenticated && !authStore.user) {
-    authStore.fetchMe()
+  api.get('csrf/').catch(() => {})
+  if (authStore.isAuthenticated) {
+    if (!authStore.user) authStore.fetchMe()
+    chatStore.startPolling()
   }
-  if (authStore.isAuthenticated) chatStore.startPolling()
-
 })
 </script>
 
 <template>
   <ToastHost />
   <RouterView />
+  <LoginPromptModal />
 </template>

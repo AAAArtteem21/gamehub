@@ -41,7 +41,7 @@ const visibleHistory = computed(() => fullHistory.value.slice(0, historyLimit.va
 const canExpandHistory = computed(() => fullHistory.value.length > historyLimit.value)
 
 async function loadFav() {
-  if (isMe.value) return
+  if (isMe.value || !authStore.isAuthenticated) return
   try {
     const res = await api.get('favorites/status/', { params: { user_id: route.params.id } })
     isFav.value = !!res.data.favorited
@@ -51,6 +51,7 @@ async function loadFav() {
 }
 
 async function toggleFav() {
+  if (!authStore.requireAuth('Войди через Steam, чтобы добавлять в избранное.')) return
   try {
     const res = await api.post('favorites/toggle/', { user_id: Number(route.params.id) })
     isFav.value = !!res.data.favorited
@@ -58,12 +59,16 @@ async function toggleFav() {
     alert(e.response?.data?.detail || 'Не удалось')
   }
 }
-
 function goCompare() {
+  if (!authStore.requireAuth('Войди через Steam, чтобы сравнить статистику с собой.')) return
   router.push({ path: '/compare', query: { user_id: route.params.id } })
 }
 
-async function load() {
+function load() {
+  return doLoad(false)
+}
+
+async function doLoad(isRetry) {
   loading.value = true
   error.value = null
   profile.value = null
@@ -83,6 +88,8 @@ async function load() {
     if (statsAccounts.value.length) activeTab.value = statsAccounts.value[0].id
     await loadFav()
   } catch (e) {
+    // протухший токен: интерцептор уже разлогинил, пробуем один раз как гость
+    if (e.response?.status === 401 && !isRetry) return doLoad(true)
     error.value = e.response
       ? `Ошибка ${e.response.status}: ${e.response.data?.detail || 'не удалось загрузить'}`
       : 'Сервер не ответил'
