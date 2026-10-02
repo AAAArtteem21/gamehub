@@ -9,6 +9,7 @@ import ChatSidebar from '../components/chat/ChatSidebar.vue'
 import NotificationsPanel from '../components/lfg/NotificationsPanel.vue'
 import { GAMES } from '../constants/games'
 import GameIcon from '../components/lfg/GameIcon.vue'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const posts = ref([])

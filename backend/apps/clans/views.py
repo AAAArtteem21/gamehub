@@ -167,7 +167,7 @@ class ClanViewSet(viewsets.ModelViewSet):
 
 class ClanLeaderboardView(APIView):
     """GET /api/clans/leaderboard/ — топ кланов по активности за 30 дней"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         from .services import _period_activity

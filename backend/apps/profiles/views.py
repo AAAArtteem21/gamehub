@@ -109,7 +109,7 @@ class GameAccountViewSet(viewsets.ModelViewSet):
         return Response(get_account_summary(account))
     
 class LeaderboardView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         game = request.query_params.get("game")
@@ -141,7 +141,7 @@ class LeaderboardView(APIView):
             })
         return Response(data)
 class PublicProfileView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request, user_id):
         from django.contrib.auth import get_user_model
@@ -185,7 +185,7 @@ class WorldLeaderboardView(APIView):
     GET /api/world-leaderboard/?game=dota2|lol — топ игроков из открытых источников,
     включая тех, кто никогда не регистрировался на GameHub
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         game = request.query_params.get("game", "dota2")
@@ -297,7 +297,7 @@ class GuestProfileView(APIView):
     GET /api/guest-profile/dota2/{account_id}/
     GET /api/guest-profile/valorant/{Name%23Tag}/
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request, game, external_id):
         game = (game or "").lower()
@@ -512,7 +512,7 @@ class GuestProfileView(APIView):
 
 
 class MatchParticipantsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request, game, match_id):
         if game == "dota2":
