@@ -533,4 +533,10 @@ onMounted(loadClans)
 }
 .logo-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
 .logo-edit-btn:disabled { opacity: 0.6; cursor: wait; }
+
+@media (max-width: 900px) {
+  .clans-grid { grid-template-columns: 1fr; }
+  .dashboard-modal { width: 100%; max-width: 100vw; max-height: 90vh; border-radius: 0; }
+  .page-header h1 { font-size: 18px; }
+}
 </style>

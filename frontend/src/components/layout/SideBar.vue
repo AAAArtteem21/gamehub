@@ -1,6 +1,6 @@
 <script setup>
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, inject } from 'vue'
 import logo from '../../assets/images/logo.png'
 import api from '../../api/axios'
 import IconHome from '../icons/IconHome.vue'
@@ -8,12 +8,13 @@ import IconSword from '../icons/IconSword.vue'
 import IconShield from '../icons/IconShield.vue'
 import IconTarget from '../icons/IconTarget.vue'
 import { useToast } from '../../composables/useToast'
-import { watch } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
-
 const toast = useToast()
+
+const sidebarOpen = inject('sidebarOpen', ref(false))
+const closeSidebar = inject('closeSidebar', () => {})
 
 const navItems = [
   { name: 'Дашборд', path: '/', icon: IconHome },
@@ -66,6 +67,10 @@ function resetPersonal() {
 function isActive(path) {
   if (path === '/') return route.path === '/'
   return route.path === path || route.path.startsWith(path + '/')
+}
+
+function onNavClick() {
+  closeSidebar()
 }
 
 async function loadQuickStats() {
@@ -136,6 +141,7 @@ async function sendClanMsg() {
 }
 
 function openFavorite(u) {
+  closeSidebar()
   if (u.link) {
     router.push(u.link)
     return
@@ -157,7 +163,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ open: sidebarOpen }">
     <div class="logo">
       <img :src="logo" alt="GameEyes" class="logo-mark" />
       <div class="logo-text-group">
@@ -173,6 +179,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
         :to="item.path"
         class="nav-item"
         :class="{ active: isActive(item.path) }"
+        @click="onNavClick"
       >
         <span class="nav-icon"><component :is="item.icon" /></span>
         {{ item.name }}
@@ -630,8 +637,26 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   font-weight: 700;
 }
 .chat-form-btn {
-  background: var(--accent); color: #12100c; border: none;
-  padding: 8px; border-radius: var(--radius-sm); font-weight: 700; cursor: pointer;
+  background: var(--accent);
+  color: #12100c;
+  border: none;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  cursor: pointer;
 }
 .chat-form button:disabled { opacity: 0.5; }
+
+@media (max-width: 900px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.2s var(--ease);
+    z-index: 50;
+    width: min(var(--sidebar-w), 86vw);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
+  }
+}
 </style>

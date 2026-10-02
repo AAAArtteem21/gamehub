@@ -636,4 +636,8 @@ onMounted(() => {
   padding: 2px 7px;
   border-radius: var(--radius-sm);
 }
+@media (max-width: 900px) {
+  .home-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 18px; }
+}
 </style>

@@ -326,4 +326,19 @@ async function handleRespond() {
     transform: rotate(360deg);
   }
 }
+
+@media (max-width: 600px) {
+  .lfg-card {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .lfg-actions {
+    flex-direction: row;
+    width: 100%;
+  }
+  .btn-respond, .btn-chat {
+    flex: 1;
+    min-width: 0;
+  }
+}
 </style>
