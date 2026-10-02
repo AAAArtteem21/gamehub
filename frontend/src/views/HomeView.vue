@@ -3,7 +3,10 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api/axios'
 import ClanIcon from '../components/clans/ClanIcon.vue'
+import { useAuthStore } from '../stores/auth'
 
+
+const auth = useAuthStore()
 const router = useRouter()
 
 const lfgPosts = ref([])
@@ -102,14 +105,18 @@ function leaderboardTo(entry) {
 }
 
 watch(selectedGame, loadLeaderboard)
-watch(recentMatchesPlatform, loadRecentMatches)
+watch(recentMatchesPlatform, () => {
+  if (auth.isAuthenticated) loadRecentMatches()
+})
 
 onMounted(() => {
   loadLfg()
   loadLeaderboard()
   loadClanLeaderboard()
-  loadRecentMatches()
-  loadSocialBlocks()
+  if (auth.isAuthenticated) {
+    loadRecentMatches()
+    loadSocialBlocks()
+  }
 })
 </script>
 
@@ -132,7 +139,7 @@ onMounted(() => {
 
     <div class="home-grid">
       <div class="col-main">
-        <div class="card section-card">
+        <div v-if="auth.isAuthenticated" class="card section-card">
           <div class="section-head">
             <h3>Последние заявки LFG</h3>
             <RouterLink to="/lfg" class="link-all">Все →</RouterLink>
@@ -150,6 +157,13 @@ onMounted(() => {
             </div>
             <span class="lfg-meta">{{ post.responses_count ?? 0 }} откликов</span>
           </div>
+        </div>
+        <div v-else class="card section-card">
+          <div class="section-head"><h3>Твоя статистика</h3></div>
+          <div class="empty-hint">Войди, чтобы видеть свои матчи и рекомендации</div>
+          <button type="button" class="btn-primary" @click="auth.loginWithSteam()">
+            Войти через Steam
+          </button>
         </div>
 
         <div class="card section-card">

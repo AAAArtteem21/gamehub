@@ -16,13 +16,12 @@ const router = createRouter({
     {
       path: '/',
       component: DashboardLayout,
-      meta: { requiresAuth: true },
       children: [
         { path: '', name: 'home', component: HomeView },
         { path: 'lfg', name: 'lfg', component: LFGFeedView },
         { path: 'lfg/:id', name: 'lfg-lobby', component: () => import('../views/LFGLobbyView.vue') },
         { path: 'clans', name: 'clans', component: ClanView },
-        { path: 'profile', name: 'profile', component: ProfileView },
+        { path: 'profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
         {
           path: 'players/guest/:game/:externalId',
           name: 'guest-profile',

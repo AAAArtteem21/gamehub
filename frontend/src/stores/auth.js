@@ -2,9 +2,13 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '../api/axios'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('gamehub_token') || null)
   const user = ref(null)
+  const loginPromptOpen = ref(false)
+  const loginPromptReason = ref('')
 
   const isAuthenticated = computed(() => !!token.value)
 
@@ -26,14 +30,30 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await api.get('me/')
       user.value = res.data
     } catch (e) {
-      logout()
+      // выходим только если токен реально невалидный, а не при сбое сети/сервера
+      if (e.response?.status === 401) logout()
     }
   }
 
-  // при старте приложения — если токен уже есть, сразу проставить заголовок
+  // вернёт true, если можно продолжать; иначе покажет окно "войди через Steam"
+  function requireAuth(reason = '') {
+    if (isAuthenticated.value) return true
+    loginPromptReason.value = reason
+    loginPromptOpen.value = true
+    return false
+  }
+
+  function loginWithSteam() {
+    sessionStorage.setItem('post_login_redirect', location.pathname + location.search)
+    window.location.href = `${API_BASE}/api/auth/steam/start/`
+  }
+
   if (token.value) {
     api.defaults.headers.common['Authorization'] = `Token ${token.value}`
   }
 
-  return { token, user, isAuthenticated, setToken, logout, fetchMe }
+  return {
+    token, user, isAuthenticated, loginPromptOpen, loginPromptReason,
+    setToken, logout, fetchMe, requireAuth, loginWithSteam,
+  }
 })

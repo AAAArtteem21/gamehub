@@ -61,9 +61,11 @@ function toggleMenu() {
   notifOpen.value = false
 }
 
-function handleLogout() {
+async function handleLogout() {
+  try { await api.post('logout/') } catch { /* */ }
   authStore.logout()
-  router.push('/login')
+  menuOpen.value = false
+  router.push('/')
 }
 
 function handleClickOutside(e) {
@@ -120,11 +122,22 @@ function timeAgo(iso) {
   return `${Math.floor(sec / 86400)} д`
 }
 
+function startNotifications() {
+  loadNotifications()
+  clearInterval(notifTimer)
+  notifTimer = setInterval(loadNotifications, 60000)
+}
+function stopNotifications() {
+  clearInterval(notifTimer)
+  notifications.value = []
+}
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  loadNotifications()
-  notifTimer = setInterval(loadNotifications, 60000)
+  if (authStore.isAuthenticated) startNotifications()
 })
+
+watch(() => authStore.isAuthenticated, (v) => (v ? startNotifications() : stopNotifications()))
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
@@ -168,7 +181,8 @@ onUnmounted(() => {
     </form>
 
     <div class="top-right">
-      <div class="notif-wrap" ref="notifRef">
+      <template v-if="authStore.isAuthenticated">
+        <div class="notif-wrap" ref="notifRef">
         <button type="button" class="bell-btn" @click.stop="toggleNotif" title="Уведомления">
           <span class="bell-icon">🔔</span>
           <span v-if="unread" class="bell-badge">{{ unread > 9 ? '9+' : unread }}</span>
@@ -229,11 +243,21 @@ onUnmounted(() => {
           </div>
         </transition>
       </div>
+      </template>
+      <button v-else type="button" class="login-btn" @click="authStore.loginWithSteam()">
+        Войти через Steam
+      </button>
     </div>
   </header>
 </template>
 
 <style scoped>
+.login-btn {
+  background: #1b2838; color: #fff; border: 1px solid #2a3f5a;
+  padding: 8px 14px; border-radius: var(--radius-sm);
+  font-weight: 600; font-size: 12px; cursor: pointer;
+}
+
 .topbar {
   height: 56px;
   display: flex;

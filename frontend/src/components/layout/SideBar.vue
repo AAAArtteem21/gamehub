@@ -8,6 +8,10 @@ import IconSword from '../icons/IconSword.vue'
 import IconShield from '../icons/IconShield.vue'
 import IconTarget from '../icons/IconTarget.vue'
 import { useToast } from '../../composables/useToast'
+import { watch } from 'vue'
+import { useAuthStore } from '../../stores/auth'
+
+const auth = useAuthStore()
 
 const toast = useToast()
 
@@ -45,6 +49,19 @@ const weekMatches = computed(() => {
 })
 
 const activeClan = computed(() => clanPanels.value[activeClanIdx.value] || null)
+
+function loadPersonal() {
+  loadQuickStats()
+  loadSocial()
+  loadClanPanel()
+}
+
+function resetPersonal() {
+  quickStats.value = null
+  weekly.value = null
+  favorites.value = []
+  clanPanels.value = []
+}
 
 function isActive(path) {
   if (path === '/') return route.path === '/'
@@ -134,10 +151,9 @@ function openFavorite(u) {
 }
 
 onMounted(() => {
-  loadQuickStats()
-  loadSocial()
-  loadClanPanel()
+  if (auth.isAuthenticated) loadPersonal()
 })
+watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 </script>
 
 <template>
@@ -202,7 +218,15 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="sidebar-widget">
+    <div class="sidebar-widget" v-if="!auth.isAuthenticated">
+      <span class="widget-title">Аккаунт</span>
+      <div class="fav-empty">Войди, чтобы видеть статистику, кланы и чаты</div>
+      <button type="button" class="chat-form-btn" @click="auth.loginWithSteam()">
+        Войти через Steam
+      </button>
+    </div>
+
+    <div class="sidebar-widget" v-if="auth.isAuthenticated">
       <span class="widget-title">Избранные</span>
       <div v-if="!favorites.length" class="fav-empty">
         На профиле нажми «☆ В избранное»
@@ -604,6 +628,10 @@ onMounted(() => {
   padding: 0 10px;
   cursor: pointer;
   font-weight: 700;
+}
+.chat-form-btn {
+  background: var(--accent); color: #12100c; border: none;
+  padding: 8px; border-radius: var(--radius-sm); font-weight: 700; cursor: pointer;
 }
 .chat-form button:disabled { opacity: 0.5; }
 </style>

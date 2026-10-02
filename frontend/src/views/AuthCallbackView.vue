@@ -12,9 +12,11 @@ onMounted(async () => {
   if (token) {
     authStore.setToken(token)
     await authStore.fetchMe()
-    router.push('/')
+    const back = sessionStorage.getItem('post_login_redirect') || '/'
+    sessionStorage.removeItem('post_login_redirect')
+    router.replace(back)
   } else {
-    router.push('/login')
+    router.replace('/login')
   }
 })
 </script>

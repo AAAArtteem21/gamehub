@@ -70,13 +70,13 @@ class SteamAuthErrorView(APIView):
     permission_classes = [permissions.AllowAny]
     def get(self,request):
         return Response(
-            {'detail':'Не удалось найти аккаунт стим попробуйте позже'},
+            {'detail':'Не удалось найти аккаунт стим попробуйте     позже'},
             status=status.HTTP_400_BAD_REQUEST
         )
 
 class PlayerSearchView(APIView):
     """GET /api/players/search/?q=be"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         User = get_user_model()

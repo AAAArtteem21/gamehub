@@ -29,13 +29,11 @@ async function handleRespond() {
   if (state.value !== 'idle') return
   state.value = 'loading'
   try {
-    await props.onRespond(props.post.id)
-    state.value = 'done'
+    const ok = await props.onRespond(props.post.id)
+    state.value = ok === false ? 'idle' : 'done'
   } catch (e) {
     state.value = 'error'
-    setTimeout(() => {
-      state.value = 'idle'
-    }, 2000)
+    setTimeout(() => { state.value = 'idle' }, 2000)
   }
 }
 </script>

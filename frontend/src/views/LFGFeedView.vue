@@ -19,7 +19,7 @@ const error = ref(null)
 const showCreateModal = ref(false)
 const chatPost = ref(null)
 const chatSidebarRef = ref(null)
-
+const authStore = useAuthStore()
 const gameFilter = ref('')
 const searchTerm = ref('')
 
@@ -54,7 +54,15 @@ async function loadMore() {
   }
 }
 
+function openCreate() {
+  if (authStore.requireAuth('Войди через Steam, чтобы создать заявку.')) {
+    showCreateModal.value = true
+  }
+}
+
+
 async function respond(postId) {
+  if (!authStore.requireAuth('Войди через Steam, чтобы откликнуться.')) return false
   await lfgApi.respond(postId)
   const post = posts.value.find((p) => p.id === postId)
   if (post) {
@@ -62,6 +70,7 @@ async function respond(postId) {
     post.has_responded = true
   }
   chatSidebarRef.value?.loadThreads()
+  return true
 }
 
 function onPostCreated(newPost) {
@@ -88,6 +97,7 @@ function setFilter(g) {
 onMounted(() => {
   if (route.query.search) searchTerm.value = route.query.search
   loadPosts()
+  if (route.query.create) openCreate()
 })
 </script>
 
@@ -103,7 +113,7 @@ onMounted(() => {
       </button>
     </div>
 
-    <NotificationsPanel />
+    <NotificationsPanel v-if="authStore.isAuthenticated" />
 
     <div class="filters-wrap">
       <div class="filters">
@@ -162,7 +172,7 @@ onMounted(() => {
         </button>
       </div>
 
-      <ChatSidebar ref="chatSidebarRef" @open-thread="openChat" />
+      <ChatSidebar v-if="authStore.isAuthenticated" ref="chatSidebarRef" @open-thread="openChat" />
     </div>
 
     <CreatePostModal
