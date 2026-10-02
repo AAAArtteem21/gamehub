@@ -19,11 +19,15 @@ const platforms = [
   { value: 'roblox', label: 'Roblox', hint: 'Никнейм Roblox' },
   { value: 'fortnite', label: 'Fortnite', hint: 'Никнейм Epic Games' },
 ]
+
 async function submit() {
   submitting.value = true
   errors.value = {}
   try {
-    const res = await profilesApi.create({ platform: platform.value, external_id: externalId.value })
+    const res = await profilesApi.create({
+      platform: platform.value,
+      external_id: externalId.value,
+    })
     emit('created', res.data)
     emit('close')
   } catch (e) {
@@ -35,63 +39,82 @@ async function submit() {
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')">
-    <div class="modal card">
-      <div class="modal-header">
-        <h3>Подключить аккаунт</h3>
-        <button class="close-btn" @click="emit('close')">✕</button>
+  <Teleport to="body">
+    <div class="overlay" @click.self="emit('close')">
+      <div class="modal card">
+        <div class="modal-header">
+          <h3>Подключить аккаунт</h3>
+          <button type="button" class="close-btn" @click="emit('close')">✕</button>
+        </div>
+
+        <form class="form" @submit.prevent="submit">
+          <label>
+            Платформа
+            <select v-model="platform">
+              <option
+                v-for="p in platforms"
+                :key="p.value"
+                :value="p.value"
+              >
+                {{ p.label }}
+              </option>
+            </select>
+          </label>
+
+          <label>
+            ID аккаунта
+            <input
+              v-model="externalId"
+              :placeholder="platforms.find((p) => p.value === platform)?.hint"
+            />
+            <span class="error" v-if="errors.external_id">{{ errors.external_id[0] }}</span>
+            <span class="error" v-if="errors.platform">{{ errors.platform[0] }}</span>
+          </label>
+
+          <span class="error" v-if="errors.detail">{{ errors.detail }}</span>
+
+          <button type="submit" class="btn-submit" :disabled="submitting">
+            {{ submitting ? 'Подключаем...' : 'Подключить' }}
+          </button>
+        </form>
       </div>
-
-      <form @submit.prevent="submit" class="form">
-        <label>
-          Платформа
-          <select v-model="platform">
-            <option v-for="p in platforms" :key="p.value" :value="p.value">{{ p.label }}</option>
-          </select>
-        </label>
-
-        <label>
-          ID аккаунта
-          <input v-model="externalId" :placeholder="platforms.find(p => p.value === platform)?.hint" />
-          <span class="error" v-if="errors.external_id">{{ errors.external_id[0] }}</span>
-          <span class="error" v-if="errors.platform">{{ errors.platform[0] }}</span>
-        </label>
-
-        <span class="error" v-if="errors.detail">{{ errors.detail }}</span>
-
-        <button type="submit" class="btn-primary" :disabled="submitting">
-          {{ submitting ? 'Подключаем...' : 'Подключить' }}
-        </button>
-      </form>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  box-sizing: border-box;
 }
 
 .modal {
-  width: 420px;
-  max-width: 90vw;
+  width: 400px;
+  max-width: 100%;
+  max-height: min(90vh, 640px);
+  overflow-y: auto;
+  padding: 20px;
+  margin: 0;
 }
 
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .modal-header h3 {
   margin: 0;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .close-btn {
@@ -100,6 +123,12 @@ async function submit() {
   color: var(--text-secondary);
   font-size: 16px;
   cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
 }
 
 .form {
@@ -112,23 +141,27 @@ label {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
+  font-weight: 500;
 }
 
-input, select {
-  background: var(--bg-primary);
+input,
+select {
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   font-family: inherit;
 }
 
-input:focus, select:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--shadow-ring);
 }
 
 .error {
@@ -136,20 +169,26 @@ input:focus, select:focus {
   font-size: 12px;
 }
 
-.btn-primary {
+.btn-submit {
   background: var(--accent);
-  color: white;
-  border: none;
-  padding: 12px;
+  color: #12100c;
+  border: 1px solid var(--accent);
+  padding: 11px;
   border-radius: var(--radius-sm);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
-  margin-top: 6px;
+  margin-top: 4px;
+  font-family: inherit;
 }
 
-.btn-primary:disabled {
-  opacity: 0.6;
+.btn-submit:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-submit:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 </style>
