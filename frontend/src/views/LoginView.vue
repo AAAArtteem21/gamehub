@@ -6,24 +6,6 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 function loginWithSteam() {
   window.location.href = `${API_BASE}/api/auth/steam/start/`
 }
-
-async function loginWithSteam() {
-  await fetch(`${API_BASE}/api/csrf/`, { credentials: 'include' })
-  const csrftoken = getCookie('csrftoken')
-
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = `${API_BASE}/auth/login/steam/`
-
-  const input = document.createElement('input')
-  input.type = 'hidden'
-  input.name = 'csrfmiddlewaretoken'
-  input.value = csrftoken
-  form.appendChild(input)
-
-  document.body.appendChild(form)
-  form.submit()
-}
 </script>
 
 <template>
