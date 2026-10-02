@@ -14,10 +14,23 @@ from .services import notify
 from django.contrib.auth import get_user_model
 from .models import UserProfile,Notification
 from .serializers import UserProfileSerializer
+from django.middleware.csrf import get_token
+from django.http import HttpResponse
 
 @ensure_csrf_cookie
 def get_csrf_token(request):
     return JsonResponse({"detail": "CSRF cookie set"})
+
+@ensure_csrf_cookie
+def steam_start(request):
+    token = get_token(request)
+    html = f"""<!doctype html>
+<form id="f" method="post" action="/auth/login/steam/">
+  <input type="hidden" name="csrfmiddlewaretoken" value="{token}">
+</form>
+<script>document.getElementById('f').submit()</script>"""
+    return HttpResponse(html)
+
 
 class MeView(generics.RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
