@@ -8,10 +8,10 @@
   --border-color: rgba(255, 255, 255, 0.06);
   --border-hover: rgba(255, 255, 255, 0.12);
 
-  --accent: #b39a6b;
-  --accent-hover: #c2a97a;
-  --accent-dim: rgba(179, 154, 107, 0.08);
-  --accent-ring: rgba(196, 165, 116, 0.22);
+  --accent: #e63946;
+  --accent-hover: #f05a66;
+  --accent-dim: rgba(230, 57, 70, 0.10);
+  --accent-ring: rgba(230, 57, 70, 0.28);
   --accent-2: #6b8f9e;
   --accent-2-dim: rgba(107, 143, 158, 0.12);
 
@@ -121,7 +121,7 @@ a:hover {
 }
 
 ::selection {
-  background: rgba(196, 165, 116, 0.28);
+  background: rgba(230, 57, 70, 0.28);
   color: #fff;
 }
 
@@ -293,5 +293,5 @@ select:focus {
   font-size: 11px;
   padding: 3px 9px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(196, 165, 116, 0.25);
+  border: 1px solid rgba(230, 57, 70, 0.25);
 }
