@@ -3,10 +3,8 @@ import logo from '../assets/images/logo.png'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-function getCookie(name) {
-  const value = `; ${document.cookie}`
-  const parts = value.split(`; ${name}=`)
-  if (parts.length === 2) return parts.pop().split(';').shift()
+function loginWithSteam() {
+  window.location.href = `${API_BASE}/api/auth/steam/start/`
 }
 
 async function loginWithSteam() {

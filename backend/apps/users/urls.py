@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     MeView, LogoutView, SteamAuthCompleteView, SteamAuthErrorView,
     get_csrf_token, PlayerSearchView, NotificationListView, NotificationReadView,
-    ProgressView, ReferralClaimView,
+    ProgressView, ReferralClaimView, steam_start
 )
 
 urlpatterns = [
@@ -16,4 +16,5 @@ urlpatterns = [
     path("players/search/", PlayerSearchView.as_view()),
     path("notifications/", NotificationListView.as_view()),
     path("notifications/read/", NotificationReadView.as_view()),
+    path("auth/steam/start/", steam_start),
 ]
