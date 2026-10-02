@@ -16,6 +16,7 @@ const router = createRouter({
     {
       path: '/',
       component: DashboardLayout,
+      // ВАЖНО: тут больше нет meta.requiresAuth
       children: [
         { path: '', name: 'home', component: HomeView },
         { path: 'lfg', name: 'lfg', component: LFGFeedView },
@@ -36,6 +37,7 @@ const router = createRouter({
           path: 'compare',
           name: 'compare',
           component: () => import('../views/CompareView.vue'),
+          meta: { requiresAuth: true },
         },
       ],
     },
@@ -45,7 +47,8 @@ const router = createRouter({
 router.beforeEach((to) => {
   const authStore = useAuthStore()
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    return '/login'
+    authStore.requireAuth('Войди через Steam, чтобы открыть эту страницу.')
+    return to.name ? { name: 'home' } : '/'
   }
 })
 
