@@ -295,3 +295,26 @@ select:focus {
   border-radius: var(--radius-sm);
   border: 1px solid rgba(230, 57, 70, 0.25);
 }
+
+@media (max-width: 900px) {
+  :root {
+    --sidebar-w: 280px;
+  }
+
+  h1 {
+    font-size: 1.2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 12.5px;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+}

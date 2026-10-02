@@ -323,5 +323,6 @@ onMounted(() => {
 
 @media (max-width: 900px) {
   .content-grid { grid-template-columns: 1fr; }
+  .page-header h1 { font-size: 18px; }
 }
 </style>

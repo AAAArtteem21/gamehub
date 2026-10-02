@@ -735,4 +735,12 @@ onMounted(() => {
   gap: 14px;
 }
 .error-state { color: var(--danger); }
+@media (max-width: 900px) {
+  .profile-header { flex-direction: column; align-items: stretch; }
+  .avatar-big { width: 56px; height: 56px; }
+  .section-header { flex-direction: column; align-items: stretch; }
+  .games-table-card { overflow-x: auto; }
+  .games-table { min-width: 480px; }
+  .gh-bar { max-width: none; }
+}
 </style>

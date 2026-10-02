@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, inject } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import IconSearch from '../icons/IconSearch.vue'
@@ -7,6 +7,7 @@ import api from '../../api/axios'
 
 const authStore = useAuthStore()
 const router = useRouter()
+const toggleSidebar = inject('toggleSidebar', () => {})
 
 const menuOpen = ref(false)
 const menuRef = ref(null)
@@ -148,6 +149,15 @@ onUnmounted(() => {
 
 <template>
   <header class="topbar">
+    <button
+      type="button"
+      class="burger"
+      aria-label="Меню"
+      @click.stop="toggleSidebar()"
+    >
+      <span /><span /><span />
+    </button>
+
     <form class="search" @submit.prevent="handleSearch">
       <span class="search-icon"><IconSearch /></span>
       <input
@@ -183,66 +193,66 @@ onUnmounted(() => {
     <div class="top-right">
       <template v-if="authStore.isAuthenticated">
         <div class="notif-wrap" ref="notifRef">
-        <button type="button" class="bell-btn" @click.stop="toggleNotif" title="Уведомления">
-          <span class="bell-icon">🔔</span>
-          <span v-if="unread" class="bell-badge">{{ unread > 9 ? '9+' : unread }}</span>
-        </button>
+          <button type="button" class="bell-btn" @click.stop="toggleNotif" title="Уведомления">
+            <span class="bell-icon">🔔</span>
+            <span v-if="unread" class="bell-badge">{{ unread > 9 ? '9+' : unread }}</span>
+          </button>
 
-        <transition name="menu-fade">
-          <div class="notif-panel" v-if="notifOpen">
-            <div class="notif-head">
-              <span>Уведомления</span>
-              <button v-if="unread" type="button" class="mark-all" @click="markRead()">
-                Прочитать все
+          <transition name="menu-fade">
+            <div class="notif-panel" v-if="notifOpen">
+              <div class="notif-head">
+                <span>Уведомления</span>
+                <button v-if="unread" type="button" class="mark-all" @click="markRead()">
+                  Прочитать все
+                </button>
+              </div>
+              <div class="notif-list">
+                <button
+                  v-for="n in notifications"
+                  :key="n.id"
+                  type="button"
+                  class="notif-item"
+                  :class="{ unread: !n.read }"
+                  @click="openNotifItem(n)"
+                >
+                  <div class="notif-body">
+                    <b>{{ n.title }}</b>
+                    <span v-if="n.body">{{ n.body }}</span>
+                  </div>
+                  <span class="notif-time">{{ timeAgo(n.created_at) }}</span>
+                </button>
+                <div v-if="!notifications.length" class="notif-empty">Пока тихо</div>
+              </div>
+            </div>
+          </transition>
+        </div>
+
+        <div class="user-block" ref="menuRef">
+          <button type="button" class="user-trigger" @click.stop="toggleMenu">
+            <div
+              class="avatar"
+              :style="authStore.user?.avatar_url ? { backgroundImage: `url(${authStore.user.avatar_url})` } : {}"
+            >
+              <span v-if="!authStore.user?.avatar_url" class="avatar-fallback">
+                {{ (authStore.user?.display_name || authStore.user?.username || '?')[0]?.toUpperCase() }}
+              </span>
+            </div>
+            <span class="username">{{ authStore.user?.display_name || authStore.user?.username || '...' }}</span>
+            <span class="chevron" :class="{ open: menuOpen }">⌄</span>
+          </button>
+
+          <transition name="menu-fade">
+            <div class="dropdown" v-if="menuOpen">
+              <RouterLink to="/profile" class="dropdown-item" @click="menuOpen = false">
+                <span class="dropdown-icon">◈</span> Мой профиль
+              </RouterLink>
+              <div class="dropdown-divider"></div>
+              <button type="button" class="dropdown-item danger" @click="handleLogout">
+                <span class="dropdown-icon">⏻</span> Выйти
               </button>
             </div>
-            <div class="notif-list">
-              <button
-                v-for="n in notifications"
-                :key="n.id"
-                type="button"
-                class="notif-item"
-                :class="{ unread: !n.read }"
-                @click="openNotifItem(n)"
-              >
-                <div class="notif-body">
-                  <b>{{ n.title }}</b>
-                  <span v-if="n.body">{{ n.body }}</span>
-                </div>
-                <span class="notif-time">{{ timeAgo(n.created_at) }}</span>
-              </button>
-              <div v-if="!notifications.length" class="notif-empty">Пока тихо</div>
-            </div>
-          </div>
-        </transition>
-      </div>
-
-      <div class="user-block" ref="menuRef">
-        <button type="button" class="user-trigger" @click.stop="toggleMenu">
-          <div
-            class="avatar"
-            :style="authStore.user?.avatar_url ? { backgroundImage: `url(${authStore.user.avatar_url})` } : {}"
-          >
-            <span v-if="!authStore.user?.avatar_url" class="avatar-fallback">
-              {{ (authStore.user?.display_name || authStore.user?.username || '?')[0]?.toUpperCase() }}
-            </span>
-          </div>
-          <span class="username">{{ authStore.user?.display_name || authStore.user?.username || '...' }}</span>
-          <span class="chevron" :class="{ open: menuOpen }">⌄</span>
-        </button>
-
-        <transition name="menu-fade">
-          <div class="dropdown" v-if="menuOpen">
-            <RouterLink to="/profile" class="dropdown-item" @click="menuOpen = false">
-              <span class="dropdown-icon">◈</span> Мой профиль
-            </RouterLink>
-            <div class="dropdown-divider"></div>
-            <button type="button" class="dropdown-item danger" @click="handleLogout">
-              <span class="dropdown-icon">⏻</span> Выйти
-            </button>
-          </div>
-        </transition>
-      </div>
+          </transition>
+        </div>
       </template>
       <button v-else type="button" class="login-btn" @click="authStore.loginWithSteam()">
         Войти через Steam
@@ -253,9 +263,36 @@ onUnmounted(() => {
 
 <style scoped>
 .login-btn {
-  background: #1b2838; color: #fff; border: 1px solid #2a3f5a;
-  padding: 8px 14px; border-radius: var(--radius-sm);
-  font-weight: 600; font-size: 12px; cursor: pointer;
+  background: #1b2838;
+  color: #fff;
+  border: 1px solid #2a3f5a;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.burger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.burger span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  background: var(--text-primary);
+  border-radius: 1px;
 }
 
 .topbar {
@@ -566,5 +603,31 @@ onUnmounted(() => {
 .menu-fade-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+@media (max-width: 900px) {
+  .burger { display: flex; }
+  .topbar {
+    padding: 0 12px;
+    gap: 10px;
+  }
+  .search {
+    flex: 1;
+    width: auto;
+    max-width: none;
+  }
+  .username { display: none; }
+  .chevron { display: none; }
+}
+
+@media (max-width: 480px) {
+  .search input {
+    font-size: 12px;
+    padding-left: 32px;
+  }
+  .login-btn {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
 }
 </style>
