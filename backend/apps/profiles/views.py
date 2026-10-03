@@ -547,6 +547,8 @@ class MatchParticipantsView(APIView):
             return self._valorant_participants(match_id)
         if game == "faceit":
             return self._faceit_participants(match_id)
+        if game in ("faceit", "cs2"):
+            return self._faceit_participants(match_id)
         return Response({"detail": "Игра не поддерживается"}, status=400)
 
     def _dota_participants(self, match_id):
@@ -652,6 +654,7 @@ class MatchParticipantsView(APIView):
         })
     def _faceit_participants(self, match_id):
         from .integrations.faceit_client import FaceitClient, FaceitError
+        from .models import GameAccount
 
         client = FaceitClient()
         try:
@@ -661,60 +664,47 @@ class MatchParticipantsView(APIView):
         except Exception:
             return Response({"detail": "Матч не найден"}, status=404)
 
-        stats_payload = {}
-        try:
-            stats_payload = client.get_match_stats(match_id) or {}
-        except Exception:
-            stats_payload = {}
-
-        # player_id -> aggregated stats from rounds
-        per_player = {}
-        rounds_out = []
-        for ri, rnd in enumerate(stats_payload.get("rounds") or []):
-            round_stats = rnd.get("teams") or []
-            kill_rows = []
-            for team in round_stats:
-                team_label = team.get("team_id") or team.get("team") or "?"
-                for pl in team.get("players") or []:
-                    pid = pl.get("player_id")
-                    if not pid:
-                        continue
-                    st = pl.get("player_stats") or {}
-                    if pid not in per_player:
-                        per_player[pid] = {
-                            "kills": 0, "deaths": 0, "assists": 0,
-                            "headshots": 0, "mvps": 0, "nickname": pl.get("nickname"),
-                        }
-                    try:
-                        per_player[pid]["kills"] += int(st.get("Kills") or st.get("kills") or 0)
-                        per_player[pid]["deaths"] += int(st.get("Deaths") or st.get("deaths") or 0)
-                        per_player[pid]["assists"] += int(st.get("Assists") or st.get("assists") or 0)
-                        per_player[pid]["headshots"] += int(st.get("Headshots") or 0)
-                        per_player[pid]["mvps"] += int(st.get("MVPs") or st.get("MVP") or 0)
-                    except (TypeError, ValueError):
-                        pass
-                    if pl.get("nickname"):
-                        per_player[pid]["nickname"] = pl.get("nickname")
-
-            rounds_out.append({
-                "round_number": ri + 1,
-                "round_stats": "ok",
-                "winner": rnd.get("round_stats", {}).get("Winner") if isinstance(rnd.get("round_stats"), dict) else None,
-            })
-
         teams = detail.get("teams") or {}
         f1 = teams.get("faction1") or {}
         f2 = teams.get("faction2") or {}
+        results = detail.get("results") or {}
+        score = results.get("score") or {}
 
-        def pack_team(faction, side_key):
-            roster = []
-            for pl in faction.get("roster") or []:
-                pid = pl.get("player_id")
-                nick = pl.get("nickname") or (per_player.get(pid) or {}).get("nickname") or "?"
-                ps = per_player.get(pid) or {}
-                k = ps.get("kills", 0)
-                d = ps.get("deaths", 0)
-                a = ps.get("assists", 0)
+        # per-player stats from /matches/{id}/stats
+        per_player = {}
+        try:
+            stats_payload = client.get_match_stats(match_id)
+            for rnd in (stats_payload.get("rounds") or []):
+                for team in (rnd.get("teams") or []):
+                    for p in (team.get("players") or []):
+                        pid = p.get("player_id")
+                        if not pid:
+                            continue
+                        st = p.get("player_stats") or {}
+                        if pid not in per_player:
+                            per_player[pid] = {
+                                "kills": 0, "deaths": 0, "assists": 0,
+                                "headshots": 0, "mvps": 0,
+                            }
+                        per_player[pid]["kills"] += int(st.get("Kills") or st.get("kills") or 0)
+                        per_player[pid]["deaths"] += int(st.get("Deaths") or st.get("deaths") or 0)
+                        per_player[pid]["assists"] += int(st.get("Assists") or st.get("assists") or 0)
+                        per_player[pid]["headshots"] += int(
+                            st.get("Headshots") or st.get("headshots") or 0
+                        )
+                        per_player[pid]["mvps"] += int(st.get("MVPs") or st.get("mvps") or 0)
+        except Exception:
+            pass
+
+        def pack_roster(roster, team_key):
+            out = []
+            for p in roster or []:
+                pid = p.get("player_id")
+                nick = p.get("nickname") or "?"
+                st = per_player.get(pid) or {}
+                k = st.get("kills", 0)
+                d = st.get("deaths", 0)
+                a = st.get("assists", 0)
 
                 gh = GameAccount.objects.filter(
                     platform="faceit",
@@ -723,51 +713,43 @@ class MatchParticipantsView(APIView):
                 if not gh and pid:
                     gh = GameAccount.objects.filter(
                         platform="faceit",
-                        external_id=str(pid),
+                        extra_stats__player_id=pid,
                     ).select_related("user").first()
 
-                roster.append({
+                out.append({
                     "player_id": pid,
                     "nickname": nick,
                     "display_name": nick,
-                    "avatar": pl.get("avatar"),
-                    "team": side_key,
+                    "avatar": p.get("avatar"),
+                    "team": team_key,
                     "kda": f"{k}/{d}/{a}",
-                    "kills": k,
-                    "deaths": d,
-                    "assists": a,
-                    "headshots": ps.get("headshots", 0),
-                    "mvps": ps.get("mvps", 0),
+                    "headshots": st.get("headshots", 0),
+                    "mvps": st.get("mvps", 0),
                     "is_gamehub_user": bool(gh),
                     "gamehub_user_id": gh.user_id if gh else None,
                 })
-            return roster
+            return out
 
-        team1 = pack_team(f1, "faction1")
-        team2 = pack_team(f2, "faction2")
-        participants = team1 + team2
+        participants = (
+            pack_roster(f1.get("roster") or f1.get("players"), "faction1")
+            + pack_roster(f2.get("roster") or f2.get("players"), "faction2")
+        )
 
-        results = detail.get("results") or {}
-        score = results.get("score") or {}
-        winner = results.get("winner")
+        map_name = None
+        voting = detail.get("voting") or {}
+        if isinstance(voting.get("map"), dict):
+            map_name = (voting["map"].get("pick") or [None])[0]
+        map_name = map_name or detail.get("map") or (detail.get("entity") or {}).get("name")
 
         return Response({
-            "game": "faceit",
-            "map": (detail.get("voting") or {}).get("map", {}).get("pick")
-                or detail.get("map")
-                or (detail.get("round_stats") or {}).get("Map")
-                or "?",
-            "competition": detail.get("competition_name") or detail.get("competition_id"),
-            "started_at": detail.get("started_at"),
-            "finished_at": detail.get("finished_at"),
+            "participants": participants,
+            "map": map_name,
             "faction1_name": f1.get("name") or "Team 1",
             "faction2_name": f2.get("name") or "Team 2",
             "faction1_score": score.get("faction1"),
             "faction2_score": score.get("faction2"),
-            "winner": winner,
-            "participants": participants,
-            "rounds_count": len(rounds_out),
-            "rounds": rounds_out,
+            "winner": results.get("winner"),
+            "competition": (detail.get("competition_name") or detail.get("competition") or ""),
         })
 
     def _valorant_participants(self, match_id):

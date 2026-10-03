@@ -740,221 +740,268 @@ class ProfileSyncService:
 
 
     def _sync_faceit(self):
-        from datetime import datetime
+        from collections import defaultdict
         from .integrations.faceit_client import FaceitClient, FaceitError
 
-        nickname = (self.account.external_id or self.account.nickname or "").strip()
-        if not nickname:
-            raise SyncError("Укажи ник Faceit")
+        raw = (self.account.external_id or "").strip()
+        if not raw:
+            raise SyncError("Укажи ник Faceit или player_id")
 
-        try:
-            client = FaceitClient()
-        except FaceitError as e:
-            raise SyncError(str(e))
+        client = FaceitClient()
 
+        # 1) Игрок: ник или uuid
         try:
-            player = client.get_player_by_nickname(nickname)
+            if len(raw) >= 32 and "-" in raw:
+                player = client.get_player(raw)
+            else:
+                player = client.get_player_by_nickname(raw)
         except FaceitError as e:
             raise SyncError(str(e))
         except Exception as e:
-            raise SyncError(f"Faceit: {e}")
+            raise SyncError(f"Faceit: не удалось найти игрока ({e})")
 
         player_id = player.get("player_id")
         if not player_id:
-            raise SyncError("Игрок Faceit не найден")
+            raise SyncError("Faceit: нет player_id")
 
+        nickname = player.get("nickname") or raw
         games = player.get("games") or {}
-        # cs2 приоритет, иначе csgo
-        game_id = None
-        for g in ("cs2", "csgo"):
-            if g in games:
-                game_id = g
-                break
-        if not game_id:
-            # fallback: первый ключ
-            game_id = next(iter(games.keys()), "cs2")
 
-        game_info = games.get(game_id) or {}
+        # CS2 → CSGO fallback
+        game_id = "cs2"
+        game_info = games.get("cs2") or {}
+        if not game_info:
+            game_id = "csgo"
+            game_info = games.get("csgo") or {}
+
         skill_level = game_info.get("skill_level")
-        faceit_elo = game_info.get("faceit_elo") or game_info.get("elo")
+        faceit_elo = game_info.get("faceit_elo")
+        try:
+            skill_level = int(skill_level) if skill_level is not None else None
+        except (TypeError, ValueError):
+            skill_level = None
+        try:
+            faceit_elo = int(faceit_elo) if faceit_elo is not None else None
+        except (TypeError, ValueError):
+            faceit_elo = None
 
-        # lifetime + maps
-        lifetime, segments = {}, []
+        # 2) Lifetime + карты
+        lifetime = {}
+        top_maps = []
+        matches_total = wins = 0
+        winrate = kd = hs = None
+
         try:
             stats_payload = client.get_player_stats(player_id, game_id)
             lifetime = stats_payload.get("lifetime") or {}
             segments = stats_payload.get("segments") or []
+
+            def L(*keys, default=None):
+                for k in keys:
+                    if k in lifetime and lifetime[k] not in (None, ""):
+                        return lifetime[k]
+                return default
+
+            matches_total = int(float(L("Matches", "matches", default=0) or 0))
+            wins = int(float(L("Wins", "wins", default=0) or 0))
+            wr_raw = L("Win Rate %", "Winrate %", "winrate")
+            kd_raw = L("Average K/D Ratio", "K/D Ratio", "K/D", "kd")
+            hs_raw = L("Average Headshots %", "Headshots %", "HS %")
+
+            try:
+                winrate = round(float(str(wr_raw).replace(",", ".")), 1) if wr_raw is not None else (
+                    round(wins / matches_total * 100, 1) if matches_total else 0
+                )
+            except (TypeError, ValueError):
+                winrate = round(wins / matches_total * 100, 1) if matches_total else 0
+
+            try:
+                kd = round(float(str(kd_raw).replace(",", ".")), 2) if kd_raw is not None else None
+            except (TypeError, ValueError):
+                kd = None
+
+            try:
+                hs = round(float(str(hs_raw).replace(",", ".")), 1) if hs_raw is not None else None
+            except (TypeError, ValueError):
+                hs = None
+
+            map_rows = []
+            for seg in segments:
+                if (seg.get("mode") or "").lower() not in ("", "5v5"):
+                    # часто карты в mode 5v5 / label Map
+                    pass
+                label = (seg.get("label") or "").strip()
+                mode = (seg.get("mode") or "").strip().lower()
+                # сегменты карт обычно type == "Map" или label de_*
+                is_map = (
+                    (seg.get("type") or "").lower() == "map"
+                    or mode == "5v5"
+                    or label.lower().startswith("de_")
+                    or label.lower().startswith("cs_")
+                )
+                if not is_map or not label:
+                    continue
+                st = seg.get("stats") or {}
+                def S(*keys, default=0):
+                    for k in keys:
+                        if k in st and st[k] not in (None, ""):
+                            return st[k]
+                    return default
+                try:
+                    m_matches = int(float(S("Matches", "matches", default=0) or 0))
+                except (TypeError, ValueError):
+                    m_matches = 0
+                if m_matches <= 0:
+                    continue
+                try:
+                    m_wins = int(float(S("Wins", "wins", default=0) or 0))
+                except (TypeError, ValueError):
+                    m_wins = 0
+                m_wr = S("Win Rate %", "Winrate %")
+                try:
+                    m_wr = round(float(str(m_wr).replace(",", ".")), 1) if m_wr is not None else (
+                        round(m_wins / m_matches * 100, 1) if m_matches else 0
+                    )
+                except (TypeError, ValueError):
+                    m_wr = round(m_wins / m_matches * 100, 1) if m_matches else 0
+                m_kd = S("Average K/D Ratio", "K/D Ratio", "K/D")
+                try:
+                    m_kd = round(float(str(m_kd).replace(",", ".")), 2) if m_kd is not None else None
+                except (TypeError, ValueError):
+                    m_kd = None
+                map_rows.append({
+                    "name": label,
+                    "matches": m_matches,
+                    "winrate": m_wr,
+                    "kd": m_kd,
+                })
+            map_rows.sort(key=lambda x: x["matches"], reverse=True)
+            top_maps = map_rows[:8]
+        except FaceitError:
+            pass
         except Exception:
-            lifetime, segments = {}, []
+            pass
 
-        def _num(d, *keys):
-            for k in keys:
-                if k in d and d[k] not in (None, ""):
-                    try:
-                        return float(str(d[k]).replace("%", "").replace(",", "."))
-                    except (TypeError, ValueError):
-                        continue
-            return None
-
-        matches_total = int(_num(lifetime, "Matches", "matches") or 0)
-        winrate = _num(lifetime, "Win Rate %", "Win Rate", "win_rate")
-        kd = _num(lifetime, "Average K/D Ratio", "K/D Ratio", "kd")
-        hs = _num(lifetime, "Average Headshots %", "Headshots %", "hs")
-        wins = int(_num(lifetime, "Wins", "wins") or 0)
-        if not wins and matches_total and winrate is not None:
-            wins = int(round(matches_total * winrate / 100))
-
-        # top maps
-        top_maps = []
-        for seg in segments:
-            if (seg.get("mode") or "").lower() not in ("", "5v5"):
-                # берём map segments
-                pass
-            label = seg.get("label") or seg.get("label") or ""
-            mode = (seg.get("mode") or "").lower()
-            st = seg.get("stats") or {}
-            if not label:
-                continue
-            # часто type == "Map"
-            if seg.get("type") and str(seg.get("type")).lower() not in ("map",):
-                continue
-            m_matches = int(_num(st, "Matches", "matches") or 0)
-            if m_matches <= 0:
-                continue
-            top_maps.append({
-                "name": label,
-                "matches": m_matches,
-                "winrate": _num(st, "Win Rate %", "Win Rate") or 0,
-                "kd": _num(st, "Average K/D Ratio", "K/D Ratio"),
-            })
-        top_maps.sort(key=lambda x: x["matches"], reverse=True)
-        top_maps = top_maps[:8]
-
-        # ----- match history -----
+        # 3) История матчей (с match_id!)
         match_history = []
-        recent_items = []
+
+        def _sget(stats: dict, *keys, default=None):
+            for k in keys:
+                if k in stats and stats[k] not in (None, ""):
+                    return stats[k]
+            return default
+
+        # Сначала detailed per-match stats (есть K/D, HS, Map + match_id)
+        items = []
         try:
             recent = client.get_recent_match_stats(player_id, game_id, limit=20)
-            recent_items = recent.get("items") or []
+            items = recent.get("items") or []
         except Exception:
-            recent_items = []
+            items = []
 
-        # fallback history list without detailed stats
-        if not recent_items:
+        # Fallback: history list
+        if not items:
             try:
                 hist = client.get_history(player_id, game=game_id, limit=20)
-                for item in (hist.get("items") or [])[:20]:
-                    match_id = item.get("match_id")
-                    finished = item.get("finished_at") or item.get("started_at")
-                    played_at = None
-                    if finished:
-                        try:
-                            played_at = datetime.utcfromtimestamp(int(finished)).strftime("%d.%m.%Y")
-                        except Exception:
-                            played_at = None
-                    # result: 1 win for player team
-                    result = item.get("results") or {}
-                    winner = (result.get("winner") or "").lower()
-                    teams = item.get("teams") or {}
-                    # find which faction player was in
-                    won = None
-                    for faction_key, team in teams.items():
-                        players = team.get("players") or []
-                        ids = [p.get("player_id") for p in players]
-                        if player_id in ids:
-                            won = faction_key.replace("faction", "faction")  # faction1/2
-                            won = (winner == faction_key) if winner else None
-                            break
-                    map_name = (item.get("competition_name") or "")[:40]
-                    match_history.append({
-                        "won": won,
-                        "title": map_name or game_id.upper(),
-                        "subtitle": "—",
-                        "duration": None,
-                        "match_id": match_id,
-                        "played_at": played_at,
-                        "verdict": None,
-                        "solo": None,
-                        "details": [
-                            {"label": "Режим", "value": item.get("game_mode") or "5v5"},
-                        ],
-                    })
+                items = hist.get("items") or []
             except Exception:
-                pass
-        else:
-            for item in recent_items[:20]:
-                stats = item.get("stats") or {}
-                match_id = item.get("match_id") or stats.get("Match Id") or stats.get("match_id")
-                # common faceit keys (string values)
-                def sget(*keys):
-                    for k in keys:
-                        if k in stats and stats[k] not in (None, ""):
-                            return stats[k]
-                    return None
+                items = []
 
-                result = (sget("Result", "result") or "").strip()
-                won = None
-                if str(result) in ("1", "Win", "win", "W"):
-                    won = True
-                elif str(result) in ("0", "Loss", "loss", "L"):
-                    won = False
+        for item in items[:20]:
+            stats = item.get("stats") or {}
 
-                kills = sget("Kills", "kills") or "0"
-                deaths = sget("Deaths", "deaths") or "0"
-                assists = sget("Assists", "assists") or "0"
-                kd_m = sget("K/D Ratio", "K/D", "kd")
-                hs_m = sget("Headshots %", "HS %")
-                map_name = sget("Map", "map") or game_id.upper()
-                score = sget("Score", "score")
+            match_id = (
+                item.get("match_id")
+                or item.get("matchId")
+                or _sget(stats, "Match Id", "match_id", "Match ID")
+                or item.get("id")
+            )
+            if match_id is not None:
+                match_id = str(match_id).strip() or None
 
-                played_at = None
-                # sometimes date in item
-                date_raw = item.get("date") or sget("Date")
-                if date_raw:
-                    try:
-                        # ms timestamp
-                        ts = int(date_raw)
-                        if ts > 10_000_000_000:
-                            ts //= 1000
-                        played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
-                    except Exception:
-                        played_at = str(date_raw)[:10]
+            result = _sget(stats, "Result", "result", "Game Result") or item.get("result")
+            won = None
+            if str(result) in ("1", "Win", "win", "W"):
+                won = True
+            elif str(result) in ("0", "Loss", "loss", "L"):
+                won = False
+            # history API: results.winner
+            if won is None:
+                results = item.get("results") or {}
+                winner = results.get("winner")
+                # team of player — rough: if we only have score, leave None
+                if winner in ("faction1", "faction2"):
+                    # can't always know which side player was without roster
+                    pass
 
-                # simple verdict by K/D
-                verdict = None
+            kills = _sget(stats, "Kills", "kills") or "0"
+            deaths = _sget(stats, "Deaths", "deaths") or "0"
+            assists = _sget(stats, "Assists", "assists") or "0"
+            kd_m = _sget(stats, "K/D Ratio", "K/D", "kd")
+            hs_m = _sget(stats, "Headshots %", "HS %", "Headshots")
+            map_name = (
+                _sget(stats, "Map", "map")
+                or item.get("map")
+                or (item.get("game_id") or game_id).upper()
+            )
+            score = _sget(stats, "Score", "score")
+
+            # history item: competition / teams
+            if not score and item.get("results"):
+                sc = (item.get("results") or {}).get("score") or {}
+                if sc:
+                    score = f"{sc.get('faction1', '?')} / {sc.get('faction2', '?')}"
+
+            played_at = None
+            date_raw = (
+                item.get("date")
+                or item.get("finished_at")
+                or item.get("started_at")
+                or _sget(stats, "Date")
+            )
+            if date_raw:
                 try:
-                    kd_f = float(str(kd_m).replace(",", "."))
-                    if kd_f >= 1.4:
-                        verdict = {"label": "Great", "tone": "great"}
-                    elif kd_f >= 1.1:
-                        verdict = {"label": "Good", "tone": "good"}
-                    elif kd_f >= 0.85:
-                        verdict = {"label": "OK", "tone": "neutral"}
-                    elif kd_f >= 0.6:
-                        verdict = {"label": "Bad", "tone": "bad"}
-                    else:
-                        verdict = {"label": "Rough", "tone": "terrible"}
+                    ts = int(date_raw)
+                    if ts > 10_000_000_000:
+                        ts //= 1000
+                    played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
                 except Exception:
-                    verdict = None
+                    played_at = str(date_raw)[:10]
 
-                match_history.append({
-                    "won": won,
-                    "title": map_name,
-                    "subtitle": f"{kills}/{deaths}/{assists}" + (f" · KD {kd_m}" if kd_m else ""),
-                    "duration": None,
-                    "match_id": match_id,
-                    "played_at": played_at,
-                    "verdict": verdict,
-                    "solo": None,
-                    "details": [
-                        {"label": "Счёт", "value": score or "—"},
-                        {"label": "K/D", "value": kd_m or "—"},
-                        {"label": "HS %", "value": hs_m or "—"},
-                        {"label": "Карта", "value": map_name},
-                    ],
-                })
+            verdict = None
+            try:
+                kd_f = float(str(kd_m).replace(",", "."))
+                if kd_f >= 1.4:
+                    verdict = {"label": "Great", "tone": "great"}
+                elif kd_f >= 1.1:
+                    verdict = {"label": "Good", "tone": "good"}
+                elif kd_f >= 0.85:
+                    verdict = {"label": "OK", "tone": "neutral"}
+                elif kd_f >= 0.6:
+                    verdict = {"label": "Bad", "tone": "bad"}
+                else:
+                    verdict = {"label": "Rough", "tone": "terrible"}
+            except Exception:
+                verdict = None
 
-        # recent form W/L
+            match_history.append({
+                "won": won,
+                "title": map_name,
+                "subtitle": f"{kills}/{deaths}/{assists}" + (f" · KD {kd_m}" if kd_m else ""),
+                "duration": None,
+                "match_id": match_id,  # обязательно для кнопки «Кто играл»
+                "played_at": played_at,
+                "verdict": verdict,
+                "solo": None,
+                "details": [
+                    {"label": "Счёт", "value": score or "—"},
+                    {"label": "K/D", "value": kd_m or "—"},
+                    {"label": "HS %", "value": hs_m or "—"},
+                    {"label": "Карта", "value": map_name},
+                ],
+            })
+
+        # recent form
         form = []
         for m in match_history[:10]:
             if m["won"] is True:
@@ -980,12 +1027,9 @@ class ProfileSyncService:
             "avatar": player.get("avatar"),
         }
         self.account.game_label = f"Faceit {game_id.upper()}"
-        self.account.nickname = player.get("nickname") or nickname
+        self.account.nickname = nickname
         if faceit_elo is not None:
-            try:
-                self.account.skill_rating = int(faceit_elo)
-            except (TypeError, ValueError):
-                pass
+            self.account.skill_rating = faceit_elo
         if player.get("avatar"):
             self.account.avatar = player.get("avatar")
 
