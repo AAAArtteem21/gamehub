@@ -312,7 +312,6 @@ class ProfileSyncService:
             game_start = meta.get("game_start")
             played_at = None
             if game_start:
-                # Henrik иногда отдаёт секунды, иногда миллисекунды
                 ts = game_start / 1000 if game_start > 10_000_000_000 else game_start
                 try:
                     played_at = datetime.fromtimestamp(ts).strftime("%d.%m.%Y")
@@ -342,6 +341,31 @@ class ProfileSyncService:
         wins = sum(1 for m in match_history if m["won"])
         winrate = round(wins / len(match_history) * 100, 1) if match_history else 0
 
+        # avg за последние игры — сами
+        nk = nd = na = acs_sum = n_m = 0
+        for m in match_history[:20]:
+            parts = (m.get("subtitle") or "").split("/")
+            if len(parts) >= 3:
+                try:
+                    nk += int(parts[0])
+                    nd += int(parts[1])
+                    na += int(str(parts[2]).split()[0])
+                    n_m += 1
+                except (TypeError, ValueError):
+                    pass
+            for det in m.get("details") or []:
+                if det.get("label") == "Combat Score (ACS)":
+                    try:
+                        acs_sum += int(det.get("value") or 0)
+                    except (TypeError, ValueError):
+                        pass
+
+        avg_kills = round(nk / n_m, 1) if n_m else None
+        avg_deaths = round(nd / n_m, 1) if n_m else None
+        avg_assists = round(na / n_m, 1) if n_m else None
+        avg_acs = round(acs_sum / n_m) if n_m and acs_sum else None
+        avg_kd = round((nk + na) / max(nd, 1), 2) if n_m else None
+
         self.account.extra_stats = {
             "matches": len(match_history),
             "wins": wins,
@@ -349,6 +373,12 @@ class ProfileSyncService:
             "tier": current_tier,
             "rr": rr,
             "main_agent": main_agent,
+            "avg_kills": avg_kills,
+            "avg_deaths": avg_deaths,
+            "avg_assists": avg_assists,
+            "avg_acs": avg_acs,
+            "avg_kd_recent": avg_kd,
+            "sample_size": n_m,
             "match_history": match_history,
         }
         self.account.game_label = "Valorant"
@@ -740,7 +770,6 @@ class ProfileSyncService:
 
 
     def _sync_faceit(self):
-        from collections import defaultdict
         from .integrations.faceit_client import FaceitClient, FaceitError
 
         raw = (self.account.external_id or "").strip()
@@ -749,7 +778,6 @@ class ProfileSyncService:
 
         client = FaceitClient()
 
-        # 1) Игрок: ник или uuid
         try:
             if len(raw) >= 32 and "-" in raw:
                 player = client.get_player(raw)
@@ -767,7 +795,6 @@ class ProfileSyncService:
         nickname = player.get("nickname") or raw
         games = player.get("games") or {}
 
-        # CS2 → CSGO fallback
         game_id = "cs2"
         game_info = games.get("cs2") or {}
         if not game_info:
@@ -785,11 +812,25 @@ class ProfileSyncService:
         except (TypeError, ValueError):
             faceit_elo = None
 
-        # 2) Lifetime + карты
+        def _to_int(v, default=0):
+            try:
+                return int(float(str(v).replace(",", ".")))
+            except (TypeError, ValueError):
+                return default
+
+        def _to_float(v, default=None):
+            if v is None or v == "":
+                return default
+            try:
+                return float(str(v).replace(",", "."))
+            except (TypeError, ValueError):
+                return default
+
         lifetime = {}
         top_maps = []
         matches_total = wins = 0
         winrate = kd = hs = None
+        adr = entry_rate = kr = None
 
         try:
             stats_payload = client.get_player_stats(player_id, game_id)
@@ -802,73 +843,61 @@ class ProfileSyncService:
                         return lifetime[k]
                 return default
 
-            matches_total = int(float(L("Matches", "matches", default=0) or 0))
-            wins = int(float(L("Wins", "wins", default=0) or 0))
+            matches_total = _to_int(L("Matches", "matches", default=0))
+            wins = _to_int(L("Wins", "wins", default=0))
             wr_raw = L("Win Rate %", "Winrate %", "winrate")
             kd_raw = L("Average K/D Ratio", "K/D Ratio", "K/D", "kd")
             hs_raw = L("Average Headshots %", "Headshots %", "HS %")
 
-            try:
-                winrate = round(float(str(wr_raw).replace(",", ".")), 1) if wr_raw is not None else (
-                    round(wins / matches_total * 100, 1) if matches_total else 0
-                )
-            except (TypeError, ValueError):
-                winrate = round(wins / matches_total * 100, 1) if matches_total else 0
+            winrate = _to_float(wr_raw)
+            if winrate is None and matches_total:
+                winrate = round(wins / matches_total * 100, 1)
+            elif winrate is not None:
+                winrate = round(winrate, 1)
+            else:
+                winrate = 0
 
-            try:
-                kd = round(float(str(kd_raw).replace(",", ".")), 2) if kd_raw is not None else None
-            except (TypeError, ValueError):
-                kd = None
+            kd = _to_float(kd_raw, None)
+            if kd is not None:
+                kd = round(kd, 2)
 
-            try:
-                hs = round(float(str(hs_raw).replace(",", ".")), 1) if hs_raw is not None else None
-            except (TypeError, ValueError):
-                hs = None
+            hs = _to_float(hs_raw, None)
+            if hs is not None:
+                hs = round(hs, 1)
+
+            adr = _to_float(L("ADR", "Average Damage per Round", "Damage/Round"))
+            if adr is not None:
+                adr = round(adr, 1)
+            entry_rate = _to_float(L("Entry Success Rate", "Entry Rate %"))
+            if entry_rate is not None:
+                entry_rate = round(entry_rate, 1)
+            kr = _to_float(L("K/R Ratio", "Average K/R Ratio", "Kills/Round"))
+            if kr is not None:
+                kr = round(kr, 2)
 
             map_rows = []
             for seg in segments:
-                if (seg.get("mode") or "").lower() not in ("", "5v5"):
-                    # часто карты в mode 5v5 / label Map
-                    pass
                 label = (seg.get("label") or "").strip()
-                mode = (seg.get("mode") or "").strip().lower()
-                # сегменты карт обычно type == "Map" или label de_*
+                st = seg.get("stats") or {}
                 is_map = (
                     (seg.get("type") or "").lower() == "map"
-                    or mode == "5v5"
                     or label.lower().startswith("de_")
                     or label.lower().startswith("cs_")
                 )
                 if not is_map or not label:
                     continue
-                st = seg.get("stats") or {}
-                def S(*keys, default=0):
-                    for k in keys:
-                        if k in st and st[k] not in (None, ""):
-                            return st[k]
-                    return default
-                try:
-                    m_matches = int(float(S("Matches", "matches", default=0) or 0))
-                except (TypeError, ValueError):
-                    m_matches = 0
+                m_matches = _to_int(st.get("Matches") or st.get("matches") or 0)
                 if m_matches <= 0:
                     continue
-                try:
-                    m_wins = int(float(S("Wins", "wins", default=0) or 0))
-                except (TypeError, ValueError):
-                    m_wins = 0
-                m_wr = S("Win Rate %", "Winrate %")
-                try:
-                    m_wr = round(float(str(m_wr).replace(",", ".")), 1) if m_wr is not None else (
-                        round(m_wins / m_matches * 100, 1) if m_matches else 0
-                    )
-                except (TypeError, ValueError):
+                m_wins = _to_int(st.get("Wins") or st.get("wins") or 0)
+                m_wr = _to_float(st.get("Win Rate %") or st.get("Winrate %"))
+                if m_wr is None:
                     m_wr = round(m_wins / m_matches * 100, 1) if m_matches else 0
-                m_kd = S("Average K/D Ratio", "K/D Ratio", "K/D")
-                try:
-                    m_kd = round(float(str(m_kd).replace(",", ".")), 2) if m_kd is not None else None
-                except (TypeError, ValueError):
-                    m_kd = None
+                else:
+                    m_wr = round(m_wr, 1)
+                m_kd = _to_float(st.get("Average K/D Ratio") or st.get("K/D Ratio") or st.get("K/D"))
+                if m_kd is not None:
+                    m_kd = round(m_kd, 2)
                 map_rows.append({
                     "name": label,
                     "matches": m_matches,
@@ -882,16 +911,13 @@ class ProfileSyncService:
         except Exception:
             pass
 
-        # 3) История матчей (с match_id!)
-        match_history = []
-
-        def _sget(stats: dict, *keys, default=None):
+        def _sget(stats, *keys, default=None):
             for k in keys:
                 if k in stats and stats[k] not in (None, ""):
                     return stats[k]
             return default
 
-        # Сначала detailed per-match stats (есть K/D, HS, Map + match_id)
+        match_history = []
         items = []
         try:
             recent = client.get_recent_match_stats(player_id, game_id, limit=20)
@@ -899,7 +925,6 @@ class ProfileSyncService:
         except Exception:
             items = []
 
-        # Fallback: history list
         if not items:
             try:
                 hist = client.get_history(player_id, game=game_id, limit=20)
@@ -925,14 +950,6 @@ class ProfileSyncService:
                 won = True
             elif str(result) in ("0", "Loss", "loss", "L"):
                 won = False
-            # history API: results.winner
-            if won is None:
-                results = item.get("results") or {}
-                winner = results.get("winner")
-                # team of player — rough: if we only have score, leave None
-                if winner in ("faction1", "faction2"):
-                    # can't always know which side player was without roster
-                    pass
 
             kills = _sget(stats, "Kills", "kills") or "0"
             deaths = _sget(stats, "Deaths", "deaths") or "0"
@@ -945,8 +962,6 @@ class ProfileSyncService:
                 or (item.get("game_id") or game_id).upper()
             )
             score = _sget(stats, "Score", "score")
-
-            # history item: competition / teams
             if not score and item.get("results"):
                 sc = (item.get("results") or {}).get("score") or {}
                 if sc:
@@ -984,30 +999,76 @@ class ProfileSyncService:
             except Exception:
                 verdict = None
 
+            elo_raw = (
+                _sget(stats, "Elo", "ELO", "Rating", "Elo Change", "elo_change")
+                or item.get("elo")
+                or item.get("elo_change")
+            )
+            elo_change = None
+            if elo_raw is not None and str(elo_raw).strip() != "":
+                try:
+                    elo_change = int(float(str(elo_raw).replace(",", ".").replace("+", "")))
+                except (TypeError, ValueError):
+                    elo_change = None
+
+            details = [
+                {"label": "Счёт", "value": score or "—"},
+                {"label": "K/D", "value": kd_m or "—"},
+                {"label": "HS %", "value": hs_m or "—"},
+                {"label": "Карта", "value": map_name},
+            ]
+            elo_sub = ""
+            if elo_change is not None:
+                sign = "+" if elo_change > 0 else ""
+                details.insert(0, {"label": "ELO", "value": f"{sign}{elo_change}"})
+                elo_sub = f" · {sign}{elo_change} ELO"
+
             match_history.append({
                 "won": won,
                 "title": map_name,
-                "subtitle": f"{kills}/{deaths}/{assists}" + (f" · KD {kd_m}" if kd_m else ""),
+                "subtitle": f"{kills}/{deaths}/{assists}"
+                    + (f" · KD {kd_m}" if kd_m else "")
+                    + elo_sub,
                 "duration": None,
-                "match_id": match_id,  # обязательно для кнопки «Кто играл»
+                "match_id": match_id,
                 "played_at": played_at,
                 "verdict": verdict,
+                "elo_change": elo_change,
                 "solo": None,
-                "details": [
-                    {"label": "Счёт", "value": score or "—"},
-                    {"label": "K/D", "value": kd_m or "—"},
-                    {"label": "HS %", "value": hs_m or "—"},
-                    {"label": "Карта", "value": map_name},
-                ],
+                "details": details,
             })
 
-        # recent form
         form = []
         for m in match_history[:10]:
             if m["won"] is True:
                 form.append("W")
             elif m["won"] is False:
                 form.append("L")
+
+        # avg за последние матчи — считаем сами
+        n = 0
+        sum_k = sum_d = sum_a = 0
+        sum_hs = 0
+        hs_n = 0
+        for m in match_history[:20]:
+            parts = (m.get("subtitle") or "").split("·")[0].strip().split("/")
+            if len(parts) >= 3:
+                sum_k += _to_int(parts[0])
+                sum_d += _to_int(parts[1])
+                sum_a += _to_int(parts[2])
+                n += 1
+            for det in m.get("details") or []:
+                if det.get("label") in ("HS %", "HS"):
+                    hv = _to_float(det.get("value"))
+                    if hv is not None:
+                        sum_hs += hv
+                        hs_n += 1
+
+        avg_kills = round(sum_k / n, 1) if n else None
+        avg_deaths = round(sum_d / n, 1) if n else None
+        avg_assists = round(sum_a / n, 1) if n else None
+        avg_kd = round((sum_k + sum_a) / max(sum_d, 1), 2) if n else None
+        avg_hs = round(sum_hs / hs_n, 1) if hs_n else hs
 
         self.account.extra_stats = {
             "player_id": player_id,
@@ -1019,6 +1080,15 @@ class ProfileSyncService:
             "winrate": winrate,
             "kd": kd,
             "hs_percent": hs,
+            "avg_kills": avg_kills,
+            "avg_deaths": avg_deaths,
+            "avg_assists": avg_assists,
+            "avg_kd_recent": avg_kd,
+            "avg_hs_recent": avg_hs,
+            "adr": adr,
+            "entry_success": entry_rate,
+            "kr": kr,
+            "sample_size": n,
             "lifetime": lifetime,
             "top_maps": top_maps,
             "recent_form": form,
@@ -1207,13 +1277,21 @@ def build_display_stats(platform, extra_stats):
         game_id = (extra_stats.get("game_id") or "cs2").upper()
         avg_k = extra_stats.get("avg_kills")
         avg_d = extra_stats.get("avg_deaths")
+        avg_a = extra_stats.get("avg_assists")
+        avg_kd_r = extra_stats.get("avg_kd_recent")
         adr = extra_stats.get("adr")
         entry = extra_stats.get("entry_success")
+        kr = extra_stats.get("kr")
+        sample = extra_stats.get("sample_size") or 0
 
         metrics = [
             {"label": "матчей", "value": matches},
             {"label": "побед", "value": wins, "tone": "win"},
-            {"label": "винрейт", "value": f"{wr}%" if wr is not None else "—", "tone": "accent"},
+            {
+                "label": "винрейт",
+                "value": f"{wr}%" if wr is not None else "—",
+                "tone": "accent",
+            },
             {"label": "K/D", "value": kd if kd is not None else "—", "tone": "accent"},
         ]
         if elo is not None:
@@ -1221,15 +1299,25 @@ def build_display_stats(platform, extra_stats):
         if skill is not None:
             metrics.append({"label": "LVL", "value": skill})
         if avg_k is not None:
-            metrics.append({"label": "ср. килы", "value": avg_k})
+            metrics.append({
+                "label": f"ср. килы ({sample})",
+                "value": avg_k,
+                "tone": "accent",
+            })
         if adr is not None:
             metrics.append({"label": "ADR", "value": adr, "tone": "accent"})
+        if avg_kd_r is not None:
+            metrics.append({"label": "K/D (20)", "value": avg_kd_r})
+        if kr is not None:
+            metrics.append({"label": "K/R", "value": kr})
 
         tags = []
         if hs is not None:
             tags.append({"label": f"HS {hs}%"})
         if avg_d is not None:
             tags.append({"label": f"ср. смерти {avg_d}"})
+        if avg_a is not None:
+            tags.append({"label": f"ср. ассисты {avg_a}"})
         if entry is not None:
             tags.append({"label": f"Entry {entry}%"})
         if extra_stats.get("country"):
@@ -1251,20 +1339,24 @@ def build_display_stats(platform, extra_stats):
 
         return {
             "game_label": extra_stats.get("game_label") or f"Faceit {game_id}",
-            "metrics": metrics[:8],
+            "metrics": metrics[:10],
             "badge": f"Level {skill}" if skill is not None else "Faceit",
             "tags": tags,
             "list_title": "Топ карты" if list_rows else "",
             "list": list_rows,
-            "list_title_2": "Сводка",
+            "list_title_2": "Сводка (последние матчи)",
             "list_2": [
                 {"name": "Игра", "value": game_id},
                 {"name": "ELO", "value": elo if elo is not None else "—"},
                 {"name": "Уровень", "value": skill if skill is not None else "—"},
-                {"name": "HS %", "value": hs if hs is not None else "—"},
+                {"name": "HS % (lifetime)", "value": hs if hs is not None else "—"},
                 {"name": "ADR", "value": adr if adr is not None else "—"},
                 {"name": "Entry success", "value": f"{entry}%" if entry is not None else "—"},
-                {"name": "Ср. килы / смерти", "value": f"{avg_k or '—'} / {avg_d or '—'}"},
+                {
+                    "name": f"Ср. K/D/A за {sample or 20}",
+                    "value": f"{avg_k or '—'} / {avg_d or '—'} / {avg_a or '—'}",
+                },
+                {"name": "K/D за выборку", "value": avg_kd_r if avg_kd_r is not None else "—"},
             ],
             "match_history": extra_stats.get("match_history") or [],
         }
@@ -1316,17 +1408,54 @@ def build_display_stats(platform, extra_stats):
         }
 
     if platform == "valorant":
+        metrics = [
+            {"label": "матчей", "value": extra_stats.get("matches", 0)},
+            {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
+            {
+                "label": "винрейт",
+                "value": f"{extra_stats.get('winrate', 0)}%",
+                "tone": "accent",
+            },
+            {"label": "RR", "value": extra_stats.get("rr", 0)},
+        ]
+        sample = extra_stats.get("sample_size") or 0
+        if extra_stats.get("avg_kills") is not None:
+            metrics.append({
+                "label": f"ср. килы ({sample})",
+                "value": extra_stats["avg_kills"],
+                "tone": "accent",
+            })
+        if extra_stats.get("avg_acs") is not None:
+            metrics.append({
+                "label": "ср. ACS",
+                "value": extra_stats["avg_acs"],
+                "tone": "accent",
+            })
+        if extra_stats.get("avg_kd_recent") is not None:
+            metrics.append({
+                "label": "K/D (выборка)",
+                "value": extra_stats["avg_kd_recent"],
+            })
+
+        tags = []
+        if extra_stats.get("main_agent"):
+            tags.append({"label": extra_stats["main_agent"]})
+        if extra_stats.get("avg_deaths") is not None:
+            tags.append({
+                "label": (
+                    f"ср. {extra_stats.get('avg_kills')}/"
+                    f"{extra_stats.get('avg_deaths')}/"
+                    f"{extra_stats.get('avg_assists') or 0}"
+                )
+            })
+
         return {
             "game_label": "Valorant",
-            "metrics": [
-                {"label": "матчей", "value": extra_stats.get("matches", 0)},
-                {"label": "побед", "value": extra_stats.get("wins", 0), "tone": "win"},
-                {"label": "винрейт", "value": f"{extra_stats.get('winrate', 0)}%", "tone": "accent"},
-                {"label": "RR", "value": extra_stats.get("rr", 0)},
-            ],
+            "metrics": metrics[:8],
             "badge": extra_stats.get("tier"),
-            "tags": [{"label": extra_stats.get("main_agent")}] if extra_stats.get("main_agent") else [],
-            "list_title": "", "list": [],
+            "tags": tags,
+            "list_title": "",
+            "list": [],
             "match_history": extra_stats.get("match_history", []),
         }
 
