@@ -24,10 +24,22 @@ const resolvedGame = computed(() => {
 })
 
 const isValorant = computed(() => resolvedGame.value === 'valorant')
-const redTeam = computed(() => participants.value.filter(p => p.team === 'Red' || p.team === 'red'))
-const blueTeam = computed(() => participants.value.filter(p => p.team === 'Blue' || p.team === 'blue'))
-const radiantPlayers = computed(() => participants.value.filter(p => p.is_radiant))
-const direPlayers = computed(() => participants.value.filter(p => !p.is_radiant))
+const isFaceit = computed(() => resolvedGame.value === 'faceit')
+
+const faceitTeam1 = computed(() =>
+  participants.value.filter((p) => p.team === 'faction1')
+)
+const faceitTeam2 = computed(() =>
+  participants.value.filter((p) => p.team === 'faction2')
+)
+const redTeam = computed(() =>
+  participants.value.filter((p) => p.team === 'Red' || p.team === 'red')
+)
+const blueTeam = computed(() =>
+  participants.value.filter((p) => p.team === 'Blue' || p.team === 'blue')
+)
+const radiantPlayers = computed(() => participants.value.filter((p) => p.is_radiant))
+const direPlayers = computed(() => participants.value.filter((p) => !p.is_radiant))
 
 function canOpenProfile(p) {
   if (!p) return false
@@ -53,6 +65,12 @@ async function load() {
       red_score: res.data.red_score,
       blue_score: res.data.blue_score,
       rounds: res.data.rounds || [],
+      faction1_name: res.data.faction1_name,
+      faction2_name: res.data.faction2_name,
+      faction1_score: res.data.faction1_score,
+      faction2_score: res.data.faction2_score,
+      winner: res.data.winner,
+      competition: res.data.competition,
     }
     activeRound.value = 0
   } catch (e) {
@@ -98,16 +116,23 @@ onMounted(load)
 
 <template>
   <div class="overlay" @click.self="emit('close')">
-    <div class="modal card fade-in-up" :class="{ 'valorant-modal': isValorant }">
+    <div
+      class="modal card fade-in-up"
+      :class="{ 'valorant-modal': isValorant || isFaceit }"
+    >
       <div class="modal-header">
         <div>
           <h3>Участники матча</h3>
-          <span class="match-meta" v-if="!isValorant && duration">
+
+          <!-- DOTA meta -->
+          <span class="match-meta" v-if="!isValorant && !isFaceit && duration">
             {{ fmtDuration(duration) }} ·
             <span :class="radiantWin ? 'radiant-text' : 'dire-text'">
               {{ radiantWin ? 'Победа Radiant' : 'Победа Dire' }}
             </span>
           </span>
+
+          <!-- VALORANT meta -->
           <span class="match-meta valorant-meta" v-if="isValorant">
             <span class="v-map">{{ matchData.map || 'Карта' }}</span>
             <span class="v-score-line">
@@ -117,6 +142,17 @@ onMounted(load)
             </span>
             <span class="v-winner-tag" v-if="matchData.red_won">Победа Red</span>
             <span class="v-winner-tag" v-else-if="matchData.blue_won">Победа Blue</span>
+          </span>
+
+          <!-- FACEIT meta -->
+          <span class="match-meta valorant-meta" v-if="isFaceit">
+            <span class="v-map">Faceit · {{ matchData.map || 'Карта' }}</span>
+            <span class="v-score-line">
+              <span class="v-score red">{{ matchData.faction1_score ?? '—' }}</span>
+              <span class="v-score-div">:</span>
+              <span class="v-score blue">{{ matchData.faction2_score ?? '—' }}</span>
+            </span>
+            <span class="v-winner-tag" v-if="matchData.competition">{{ matchData.competition }}</span>
           </span>
         </div>
         <button class="close-btn" type="button" @click="emit('close')">✕</button>
@@ -225,6 +261,73 @@ onMounted(load)
                   <span class="kill-agent">{{ kill.victim_agent }}</span>
                 </div>
                 <div class="kill-avatar placeholder victim">{{ kill.victim?.[0]?.toUpperCase() }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- FACEIT -->
+      <template v-else-if="isFaceit">
+        <div class="v-teams">
+          <div class="v-team red-side">
+            <div class="v-team-header">
+              <span>{{ matchData.faction1_name || 'Team 1' }}</span>
+              <span>{{ matchData.faction1_score ?? '' }}</span>
+            </div>
+            <div
+              v-for="p in faceitTeam1"
+              :key="p.player_id || p.nickname || p.display_name"
+              class="v-player-card"
+              :class="{ clickable: canOpenProfile(p) }"
+              @click="goToPlayer(p)"
+            >
+              <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
+              <div v-else class="v-player-avatar placeholder">
+                {{ (p.display_name || '?')[0]?.toUpperCase() }}
+              </div>
+              <div class="v-player-info">
+                <div class="v-player-top">
+                  <span class="v-player-name">{{ p.display_name }}</span>
+                  <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
+                </div>
+                <div class="v-player-kda">{{ p.kda }}</div>
+                <div class="v-player-agent" v-if="p.mvps != null || p.headshots != null">
+                  <template v-if="p.mvps">MVP ×{{ p.mvps }}</template>
+                  <template v-if="p.mvps && p.headshots != null"> · </template>
+                  <template v-if="p.headshots != null">HS {{ p.headshots }}</template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="v-team blue-side">
+            <div class="v-team-header">
+              <span>{{ matchData.faction2_name || 'Team 2' }}</span>
+              <span>{{ matchData.faction2_score ?? '' }}</span>
+            </div>
+            <div
+              v-for="p in faceitTeam2"
+              :key="p.player_id || p.nickname || p.display_name"
+              class="v-player-card"
+              :class="{ clickable: canOpenProfile(p) }"
+              @click="goToPlayer(p)"
+            >
+              <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
+              <div v-else class="v-player-avatar placeholder">
+                {{ (p.display_name || '?')[0]?.toUpperCase() }}
+              </div>
+              <div class="v-player-info">
+                <div class="v-player-top">
+                  <span class="v-player-name">{{ p.display_name }}</span>
+                  <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
+                </div>
+                <div class="v-player-kda">{{ p.kda }}</div>
+                <div class="v-player-agent" v-if="p.mvps != null || p.headshots != null">
+                  <template v-if="p.mvps">MVP ×{{ p.mvps }}</template>
+                  <template v-if="p.mvps && p.headshots != null"> · </template>
+                  <template v-if="p.headshots != null">HS {{ p.headshots }}</template>
+                </div>
               </div>
             </div>
           </div>
@@ -385,7 +488,7 @@ onMounted(load)
   inset: 0;
   z-index: 2000;
   display: flex;
-  align-items: flex-start;   /* НЕ center — иначе «низко» */
+  align-items: flex-start;
   justify-content: center;
   padding: max(32px, 6vh) 16px 48px;
   background: rgba(0, 0, 0, 0.78);
@@ -399,7 +502,7 @@ onMounted(load)
   max-width: 960px;
   flex-shrink: 0;
   margin: 0 auto;
-  max-height: none;          /* скролл у оверлея, не у модалки */
+  max-height: none;
   overflow: visible;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -407,7 +510,6 @@ onMounted(load)
   padding: 20px 22px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
   position: relative;
-  /* без transform здесь — fade-in-up может глючить с fixed */
 }
 
 .modal.fade-in-up {
@@ -424,176 +526,510 @@ onMounted(load)
     transform: translateY(0);
   }
 }
+
 .modal-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 20px; position: sticky; top: 0; background: var(--bg-card); padding-bottom: 12px; z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  padding-bottom: 12px;
+  z-index: 2;
 }
-.modal-header h3 { margin: 0 0 4px; font-size: 18px; }
-.match-meta { font-size: 12px; color: var(--text-secondary); }
-.radiant-text { color: var(--success); font-weight: 700; }
-.dire-text { color: var(--danger); font-weight: 700; }
-.close-btn { background: none; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
-.state { text-align: center; color: var(--text-secondary); padding: 60px 0; font-size: 13px; }
+.modal-header h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+.match-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.radiant-text {
+  color: var(--success);
+  font-weight: 700;
+}
+.dire-text {
+  color: var(--danger);
+  font-weight: 700;
+}
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+}
+.state {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 60px 0;
+  font-size: 13px;
+}
 .gamehub-badge {
-  font-size: 10px; font-weight: 700; color: var(--accent);
-  background: var(--accent-dim); padding: 2px 8px; border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 2px 8px;
+  border-radius: 20px;
 }
 
-.valorant-modal { max-width: 900px; }
-.valorant-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.v-map { font-weight: 600; color: var(--text-primary); }
+.valorant-modal {
+  max-width: 900px;
+}
+.valorant-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.v-map {
+  font-weight: 600;
+  color: var(--text-primary);
+}
 .v-score-line {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--bg-primary); padding: 4px 12px; border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-primary);
+  padding: 4px 12px;
+  border-radius: 20px;
   border: 1px solid var(--border-color);
 }
-.v-score { font-size: 16px; font-weight: 800; font-family: monospace; }
-.v-score.red { color: #ff6b6b; }
-.v-score.blue { color: #4dabf7; }
-.v-score.winner { color: var(--success); }
-.v-score-div { color: var(--text-muted); font-weight: 700; }
+.v-score {
+  font-size: 16px;
+  font-weight: 800;
+  font-family: monospace;
+}
+.v-score.red {
+  color: #ff6b6b;
+}
+.v-score.blue {
+  color: #4dabf7;
+}
+.v-score.winner {
+  color: var(--success);
+}
+.v-score-div {
+  color: var(--text-muted);
+  font-weight: 700;
+}
 .v-winner-tag {
-  font-size: 11px; font-weight: 700; color: var(--success);
-  background: rgba(74, 222, 128, 0.12); padding: 2px 10px; border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--success);
+  background: rgba(74, 222, 128, 0.12);
+  padding: 2px 10px;
+  border-radius: 20px;
 }
-.v-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
-@media (max-width: 700px) { .v-teams { grid-template-columns: 1fr; } }
-.v-team { display: flex; flex-direction: column; gap: 6px; }
+.v-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+@media (max-width: 700px) {
+  .v-teams {
+    grid-template-columns: 1fr;
+  }
+}
+.v-team {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .v-team-header {
-  display: flex; justify-content: space-between; padding: 8px 12px;
-  border-radius: var(--radius-sm); font-size: 13px; font-weight: 800;
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 800;
 }
-.red-side .v-team-header { background: rgba(255,107,107,0.1); color: #ff6b6b; }
-.blue-side .v-team-header { background: rgba(77,171,247,0.1); color: #4dabf7; }
+.red-side .v-team-header {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+}
+.blue-side .v-team-header {
+  background: rgba(77, 171, 247, 0.1);
+  color: #4dabf7;
+}
 .v-player-card {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
   transition: border-color 0.15s ease;
 }
-.v-player-card.clickable { cursor: pointer; }
-.v-player-card.clickable:hover { border-color: var(--accent); }
+.v-player-card.clickable {
+  cursor: pointer;
+}
+.v-player-card.clickable:hover {
+  border-color: var(--accent);
+}
 .v-player-avatar {
-  width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--bg-card-hover);
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--bg-card-hover);
 }
 .v-player-avatar.placeholder {
-  display: flex; align-items: center; justify-content: center;
-  font-size: 14px; font-weight: 700; color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
 }
-.v-player-name { font-weight: 700; font-size: 13px; }
-.v-player-agent { font-size: 11px; color: var(--text-secondary); }
-.v-player-kda { font-size: 12px; font-family: monospace; color: var(--text-muted); }
-.v-player-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.v-player-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v-player-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+.v-player-agent {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.v-player-kda {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-muted);
+}
+.v-player-top {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.v-player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 
 .rounds-title {
-  font-size: 12px; font-weight: 800; text-transform: uppercase;
-  color: var(--text-secondary); margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
 }
-.round-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.round-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
 .round-tab {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--bg-primary); border: 1px solid var(--border-color);
-  color: var(--text-secondary); font-size: 12px; font-weight: 600;
-  padding: 6px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
 }
-.round-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-.round-dot { width: 6px; height: 6px; border-radius: 50%; }
-.round-dot.red { background: #ff6b6b; }
-.round-dot.blue { background: #4dabf7; }
-.round-kills { display: flex; flex-direction: column; gap: 6px; }
-.no-kills { text-align: center; color: var(--text-muted); font-size: 13px; padding: 16px 0; }
+.round-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.round-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.round-dot.red {
+  background: #ff6b6b;
+}
+.round-dot.blue {
+  background: #4dabf7;
+}
+.round-kills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.no-kills {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px 0;
+}
 .kill-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
 }
-.kill-side { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.kill-side.victim { justify-content: flex-end; }
-.kill-avatar {
-  width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; background: var(--bg-card-hover); color: var(--text-muted);
+.kill-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
-.kill-avatar.victim { background: rgba(248,113,113,0.15); color: var(--danger); }
-.kill-names { display: flex; flex-direction: column; min-width: 0; }
-.kill-names.right { align-items: flex-end; text-align: right; }
-.kill-name { font-size: 12px; font-weight: 700; }
-.kill-agent { font-size: 10px; color: var(--text-secondary); }
+.kill-side.victim {
+  justify-content: flex-end;
+}
+.kill-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg-card-hover);
+  color: var(--text-muted);
+}
+.kill-avatar.victim {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--danger);
+}
+.kill-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.kill-names.right {
+  align-items: flex-end;
+  text-align: right;
+}
+.kill-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+.kill-agent {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
 .kill-action {
-  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-  background: var(--bg-card); padding: 4px 10px; border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  background: var(--bg-card);
+  padding: 4px 10px;
+  border-radius: 20px;
   border: 1px solid var(--border-color);
 }
-.weapon { font-size: 11px; font-weight: 600; }
-.kill-time { font-size: 10px; color: var(--text-muted); font-family: monospace; }
+.weapon {
+  font-size: 11px;
+  font-weight: 600;
+}
+.kill-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
 
-.dota-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-@media (max-width: 800px) { .dota-layout { grid-template-columns: 1fr; } }
-.dota-team { display: flex; flex-direction: column; gap: 10px; }
+.dota-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 800px) {
+  .dota-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.dota-team {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .dota-team-header {
-  font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
-  padding: 6px 10px; border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
 }
 .dota-team-header.radiant {
-  color: var(--success); background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.15);
+  color: var(--success);
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.15);
 }
 .dota-team-header.dire {
-  color: var(--danger); background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.15);
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.15);
 }
 .dota-player-card {
-  background: var(--bg-primary); border: 1px solid var(--border-color);
-  border-radius: var(--radius-md); padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
   transition: border-color 0.15s ease;
 }
-.dota-player-card.clickable { cursor: pointer; }
-.dota-player-card.clickable:hover { border-color: var(--accent); }
-.dota-player-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.dota-avatar {
-  width: 44px; height: 44px; border-radius: 8px; flex-shrink: 0;
-  background-color: var(--bg-card-hover); background-size: cover; background-position: center;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted); font-weight: 700;
+.dota-player-card.clickable {
+  cursor: pointer;
 }
-.dota-name { font-weight: 700; font-size: 13px; }
-.dota-name.anon { color: var(--text-muted); font-style: italic; font-weight: 500; }
-.dota-name-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.dota-hero-row { display: flex; gap: 8px; font-size: 12px; align-items: center; }
-.dota-hero { color: var(--accent); font-weight: 700; }
-.dota-level, .dota-kda { color: var(--text-secondary); }
-.dota-kda { font-family: monospace; }
+.dota-player-card.clickable:hover {
+  border-color: var(--accent);
+}
+.dota-player-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.dota-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background-color: var(--bg-card-hover);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.dota-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+.dota-name.anon {
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 500;
+}
+.dota-name-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.dota-hero-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  align-items: center;
+}
+.dota-hero {
+  color: var(--accent);
+  font-weight: 700;
+}
+.dota-level,
+.dota-kda {
+  color: var(--text-secondary);
+}
+.dota-kda {
+  font-family: monospace;
+}
 
 .dota-stats {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 8px; margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px 8px;
+  margin-bottom: 10px;
 }
 .dst {
-  display: flex; flex-direction: column;
-  background: var(--bg-card); padding: 5px 6px; border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  padding: 5px 6px;
+  border-radius: 6px;
   border: 1px solid var(--border-color);
 }
-.dst span { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
-.dst b { font-size: 12px; font-weight: 700; margin-top: 1px; }
-.val-gold { color: #f0c75e !important; }
-.val-dmg { color: #f87171 !important; }
-
-.dota-items-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dota-items { display: flex; flex-wrap: wrap; gap: 5px; }
-.dota-extra-items { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.dota-item {
-  width: 36px; height: 36px; border-radius: 6px; overflow: hidden;
-  background: var(--bg-card-hover); border: 1px solid var(--border-color);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+.dst span {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
-.dota-item img { width: 100%; height: 100%; object-fit: cover; }
-.dota-item-fallback { font-size: 9px; font-weight: 700; color: var(--text-muted); }
+.dst b {
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 1px;
+}
+.val-gold {
+  color: #f0c75e !important;
+}
+.val-dmg {
+  color: #f87171 !important;
+}
+
+.dota-items-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dota-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.dota-extra-items {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.dota-item {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.dota-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.dota-item-fallback {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
 .dota-item.neutral {
   border-color: #a78bfa;
   box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.35);
 }
 .buff-pill {
-  font-size: 10px; font-weight: 800; padding: 3px 7px; border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 7px;
+  border-radius: 6px;
   text-transform: uppercase;
 }
-.buff-pill.scepter { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
-.buff-pill.shard { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
-.buff-pill.moon { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+.buff-pill.scepter {
+  background: rgba(96, 165, 250, 0.2);
+  color: #60a5fa;
+}
+.buff-pill.shard {
+  background: rgba(167, 139, 250, 0.2);
+  color: #a78bfa;
+}
+.buff-pill.moon {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
 </style>

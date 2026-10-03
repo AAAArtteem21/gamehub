@@ -3,6 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api/axios'
 import { useAuthStore } from '../stores/auth'
+import UniversalStatsCard from '../components/profiles/UniversalStatsCard.vue'
 import MatchParticipantsModal from '../components/profiles/MatchParticipantsModal.vue'
 import ValorantMatchModal from '../components/profiles/ValorantMatchModal.vue'
 
@@ -14,14 +15,20 @@ const profile = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const activeTab = ref(null)
-const historyLimit = ref(8)
 const openMatchId = ref(null)
 const openMatchGame = ref(null)
 const isFav = ref(false)
 
 const platformLabels = {
-  steam: 'Steam', faceit: 'Faceit', opendota: 'OpenDota',
-  lol: 'League of Legends', valorant: 'Valorant', pubg: 'PUBG', roblox: 'Roblox',
+  steam: 'Steam',
+  faceit: 'Faceit',
+  opendota: 'OpenDota',
+  lol: 'League of Legends',
+  valorant: 'Valorant',
+  fortnite: 'Fortnite',
+  pubg: 'PUBG',
+  roblox: 'Roblox',
+  manual: 'Ручной',
 }
 
 const isMe = computed(() =>
@@ -29,16 +36,17 @@ const isMe = computed(() =>
 )
 
 const statsAccounts = computed(() =>
-  (profile.value?.accounts || []).filter(a => a.display_stats)
+  (profile.value?.accounts || []).filter(
+    (a) =>
+      a.display_stats ||
+      ['opendota', 'faceit', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform) ||
+      (a.platform === 'steam' && a.display_stats)
+  ).filter((a) => a.display_stats)
 )
 
-const activeAccount = computed(() =>
-  statsAccounts.value.find(a => a.id === activeTab.value) || statsAccounts.value[0] || null
+const activeAccount = computed(
+  () => statsAccounts.value.find((a) => a.id === activeTab.value) || statsAccounts.value[0] || null
 )
-
-const fullHistory = computed(() => activeAccount.value?.display_stats?.match_history || [])
-const visibleHistory = computed(() => fullHistory.value.slice(0, historyLimit.value))
-const canExpandHistory = computed(() => fullHistory.value.length > historyLimit.value)
 
 async function loadFav() {
   if (isMe.value || !authStore.isAuthenticated) return
@@ -59,6 +67,7 @@ async function toggleFav() {
     alert(e.response?.data?.detail || 'Не удалось')
   }
 }
+
 function goCompare() {
   if (!authStore.requireAuth('Войди через Steam, чтобы сравнить статистику с собой.')) return
   router.push({ path: '/compare', query: { user_id: route.params.id } })
@@ -73,7 +82,6 @@ async function doLoad(isRetry) {
   error.value = null
   profile.value = null
   activeTab.value = null
-  historyLimit.value = 8
 
   const userId = route.params.id
   if (!userId || isNaN(Number(userId))) {
@@ -88,7 +96,6 @@ async function doLoad(isRetry) {
     if (statsAccounts.value.length) activeTab.value = statsAccounts.value[0].id
     await loadFav()
   } catch (e) {
-    // протухший токен: интерцептор уже разлогинил, пробуем один раз как гость
     if (e.response?.status === 401 && !isRetry) return doLoad(true)
     error.value = e.response
       ? `Ошибка ${e.response.status}: ${e.response.data?.detail || 'не удалось загрузить'}`
@@ -114,16 +121,18 @@ function allGamesFlat() {
 
 function selectTab(id) {
   activeTab.value = id
-  historyLimit.value = 8
 }
 
-function openMatch(m) {
-  if (!m?.match_id || !activeAccount.value) return
-  const p = activeAccount.value.platform
-  if (p === 'opendota') openMatchGame.value = 'dota2'
-  else if (p === 'valorant') openMatchGame.value = 'valorant'
-  else return
-  openMatchId.value = m.match_id
+function openMatch(matchId) {
+  if (!matchId || !activeAccount.value) return
+  const p = String(activeAccount.value.platform || '').toLowerCase()
+  if (p === 'valorant') {
+    openMatchGame.value = 'valorant'
+    openMatchId.value = matchId
+  } else if (p === 'opendota' || p === 'dota2') {
+    openMatchGame.value = 'dota2'
+    openMatchId.value = matchId
+  }
 }
 
 function closeMatch() {
@@ -136,7 +145,7 @@ watch(() => route.params.id, load)
 </script>
 
 <template>
-  <div class="public-profile">
+  <div class="profile-page">
     <div v-if="loading" class="state-message">Загружаем профиль...</div>
     <div v-else-if="error" class="state-message error-state">
       <p>{{ error }}</p>
@@ -149,90 +158,114 @@ watch(() => route.params.id, load)
           class="avatar-big"
           :style="profile.avatar_url ? { backgroundImage: `url(${profile.avatar_url})` } : {}"
         >
-          <span v-if="!profile.avatar_url">{{ (profile.display_name || profile.username || '?')[0]?.toUpperCase() }}</span>
+          <span v-if="!profile.avatar_url">
+            {{ (profile.display_name || profile.username || '?')[0]?.toUpperCase() }}
+          </span>
         </div>
         <div class="header-main">
           <h1>{{ profile.display_name || profile.username }}</h1>
-          <p class="views-count" v-if="profile.views_count !== undefined">👁 {{ profile.views_count }} просмотров</p>
+          <p class="steam-id" v-if="profile.steam_id">Steam ID: {{ profile.steam_id }}</p>
+          <p class="views-count" v-if="profile.views_count !== undefined">
+            {{ profile.views_count }} просмотров
+            <span v-if="profile.accounts_count != null"> · {{ profile.accounts_count }} акк.</span>
+          </p>
+
+          <div class="gh-block" v-if="profile.progress">
+            <div class="gh-row">
+              <span class="gh-lvl">GH {{ profile.progress.level }}</span>
+              <div class="gh-bar"><i :style="{ width: (profile.progress.pct || 0) + '%' }" /></div>
+              <span class="gh-xp">
+                {{ profile.progress.xp_into_level ?? 0 }}/{{ profile.progress.xp_per_level ?? 100 }} XP
+              </span>
+            </div>
+            <div class="gh-meta" v-if="profile.progress.tags?.length">
+              <span class="gh-tag" v-for="t in profile.progress.tags" :key="t">{{ t }}</span>
+            </div>
+          </div>
+          <div class="gh-block" v-else>
+            <span class="not-gh">Не на GameEyes / без уровня</span>
+          </div>
+
           <div class="header-actions" v-if="!isMe">
             <button type="button" class="btn-secondary" @click="goCompare">Сравнить с собой</button>
             <button type="button" class="btn-secondary" @click="toggleFav">
               {{ isFav ? '★ В избранном' : '☆ В избранное' }}
             </button>
           </div>
+          <div class="header-actions" v-else>
+            <button type="button" class="btn-secondary" @click="router.push('/profile')">
+              Редактировать свой профиль
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="card stats-card" v-if="statsAccounts.length">
-        <div class="stats-tabs">
-          <button
-            v-for="acc in statsAccounts"
-            :key="acc.id"
-            type="button"
-            class="stats-tab"
-            :class="{ active: activeAccount?.id === acc.id }"
-            @click="selectTab(acc.id)"
-          >
-            {{ acc.display_stats?.game_label || platformLabels[acc.platform] }}
-          </button>
-        </div>
+      <div class="section-header">
+        <h2>Подключённые аккаунты</h2>
+      </div>
 
-        <div class="metrics" v-if="activeAccount?.display_stats?.metrics?.length">
-          <div v-for="m in activeAccount.display_stats.metrics" :key="m.label" class="metric">
-            <span class="metric-val" :class="m.tone">{{ m.value }}</span>
-            <span class="metric-lab">{{ m.label }}</span>
+      <div v-if="!(profile.accounts || []).length" class="state-message empty-state">
+        <p>У игрока нет подключённых аккаунтов</p>
+      </div>
+
+      <template v-else>
+        <div class="platforms-row">
+          <div v-for="acc in profile.accounts" :key="acc.id" class="platform-chip">
+            <span class="platform-label">{{ platformLabels[acc.platform] || acc.platform }}</span>
+            <span class="chip-nick" v-if="acc.nickname">{{ acc.nickname }}</span>
+            <span class="verified-dot" :class="{ ok: acc.verified }"></span>
           </div>
         </div>
 
-        <div v-if="visibleHistory.length" class="history-block">
-          <h4 class="section-title">История матчей</h4>
-          <div
-            v-for="(m, i) in visibleHistory"
-            :key="i"
-            class="match-row"
-            :class="{
-              win: m.won === true,
-              loss: m.won === false,
-              clickable: !!m.match_id && (activeAccount?.platform === 'opendota' || activeAccount?.platform === 'valorant'),
-            }"
-            @click="openMatch(m)"
-          >
-            <span class="match-result">{{ m.won ? 'W' : 'L' }}</span>
-            <div class="match-info">
-              <span class="match-title">{{ m.title }}</span>
-              <span class="match-meta">
-                {{ m.played_at }}
-                <template v-if="m.duration"> · {{ m.duration }}</template>
-              </span>
-            </div>
-            <span class="match-kda">{{ m.subtitle }}</span>
-            <span v-if="m.verdict?.label" class="verdict" :class="m.verdict.tone">{{ m.verdict.label }}</span>
+        <div class="card stats-switcher-card" v-if="statsAccounts.length">
+          <div class="stats-tabs">
+            <button
+              v-for="acc in statsAccounts"
+              :key="acc.id"
+              type="button"
+              class="stats-tab"
+              :class="{ active: activeAccount?.id === acc.id }"
+              @click="selectTab(acc.id)"
+            >
+              {{
+                acc.display_stats?.game_label ||
+                platformLabels[acc.platform] ||
+                acc.platform
+              }}
+            </button>
           </div>
-          <button v-if="canExpandHistory" type="button" class="show-more" @click="historyLimit += 10">
-            Показать ещё
-          </button>
+
+          <UniversalStatsCard
+            v-if="activeAccount?.display_stats"
+            :stats="activeAccount.display_stats"
+            :platform="activeAccount.platform"
+            @open-match="openMatch"
+          />
+          <div v-else class="empty-hint">Статистика ещё не синхронизирована</div>
         </div>
-      </div>
 
-      <div class="card games-table-card" v-if="allGamesFlat().length">
-        <h3 class="table-title">Библиотека игр</h3>
-        <table class="games-table">
-          <thead>
-            <tr><th>Игра</th><th>Платформа</th><th>Часы всего</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in allGamesFlat()" :key="`${row.platform}-${row.appid}`">
-              <td class="game-cell">{{ row.game_name }}</td>
-              <td><span class="platform-tag">{{ platformLabels[row.platform] || row.platform }}</span></td>
-              <td class="hours-cell">{{ Math.round((row.playtime_forever || 0) / 60) }}ч</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div v-else-if="!statsAccounts.length" class="state-message">
-        У игрока пока нет подключённой статистики
-      </div>
+        <div class="card games-table-card" v-if="allGamesFlat().length">
+          <h3 class="card-title table-title">Библиотека игр</h3>
+          <table class="games-table">
+            <thead>
+              <tr>
+                <th>Игра</th>
+                <th>Платформа</th>
+                <th>Часы всего</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in allGamesFlat()" :key="`${row.platform}-${row.appid}`">
+                <td class="game-cell">{{ row.game_name }}</td>
+                <td>
+                  <span class="platform-tag">{{ platformLabels[row.platform] || row.platform }}</span>
+                </td>
+                <td class="hours-cell">{{ Math.round((row.playtime_forever || 0) / 60) }}ч</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
     </template>
 
     <MatchParticipantsModal
@@ -250,94 +283,276 @@ watch(() => route.params.id, load)
 </template>
 
 <style scoped>
-.public-profile { display: flex; flex-direction: column; gap: 20px; }
-.profile-header { display: flex; align-items: center; gap: 20px; }
-.avatar-big {
-  width: 72px; height: 72px; border-radius: 50%; background-color: var(--accent-dim);
-  background-size: cover; background-position: center; border: 3px solid var(--accent);
-  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-  font-size: 24px; font-weight: 800; color: var(--accent);
+.profile-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  animation: fadeInUp 0.25s var(--ease) both;
 }
-.header-main { display: flex; flex-direction: column; gap: 6px; }
-.profile-header h1 { margin: 0; font-size: 22px; }
-.views-count { margin: 0; font-size: 12px; color: var(--text-secondary); }
-.header-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.btn-secondary {
-  background: var(--bg-primary); border: 1px solid var(--border-color);
-  color: var(--text-primary); padding: 7px 12px; border-radius: 8px;
-  font-size: 12px; font-weight: 600; cursor: pointer;
-}
-.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
 
-.stats-card { display: flex; flex-direction: column; gap: 16px; }
+.profile-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 18px 20px !important;
+  width: 100%;
+}
+.avatar-big {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.header-main { min-width: 0; flex: 1; }
+.profile-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+}
+.steam-id, .views-count {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.gh-block {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gh-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gh-lvl {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+}
+.gh-bar {
+  flex: 1;
+  min-width: 100px;
+  max-width: 220px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.gh-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+.gh-xp {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.gh-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.gh-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+}
+.not-gh {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.section-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.platforms-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.platform-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.platform-label { font-weight: 600; font-size: 12px; }
+.chip-nick {
+  font-size: 11px;
+  color: var(--text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.verified-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.verified-dot.ok { background: var(--success); }
+
+.stats-switcher-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px !important;
+  width: 100%;
+}
 .stats-tabs {
-  display: flex; gap: 6px; flex-wrap: wrap;
-  border-bottom: 1px solid var(--border-color); padding-bottom: 12px;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+  flex-wrap: wrap;
 }
 .stats-tab {
-  background: none; border: none; color: var(--text-secondary); font-size: 13px; font-weight: 600;
-  padding: 7px 14px; border-radius: 20px; cursor: pointer;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
 }
-.stats-tab.active { background: var(--accent-dim); color: var(--accent); }
-
-.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; }
-.metric {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  background: var(--bg-primary); border-radius: var(--radius-sm); padding: 10px 6px;
+.stats-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
 }
-.metric-val { font-size: 18px; font-weight: 800; }
-.metric-val.win { color: var(--success); }
-.metric-val.loss { color: var(--danger); }
-.metric-val.accent { color: var(--accent); }
-.metric-lab { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; }
-
-.section-title { margin: 0 0 10px; font-size: 12px; color: var(--text-secondary); text-transform: uppercase; }
-.match-row {
-  display: flex; align-items: center; gap: 10px; padding: 10px 8px;
-  border-bottom: 1px solid var(--border-color); font-size: 13px; border-radius: 8px;
+.stats-tab.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: rgba(196, 165, 116, 0.35);
 }
-.match-row.clickable { cursor: pointer; }
-.match-row.clickable:hover { background: var(--bg-card-hover); }
-.match-result {
-  width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center;
-  justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0;
-}
-.match-row.win .match-result { background: rgba(74,222,128,0.15); color: var(--success); }
-.match-row.loss .match-result { background: rgba(248,113,113,0.15); color: var(--danger); }
-.match-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.match-title { font-weight: 700; }
-.match-meta { font-size: 11px; color: var(--text-secondary); }
-.match-kda { font-family: monospace; color: var(--text-secondary); }
-.verdict { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
-.verdict.great { background: rgba(74,222,128,0.15); color: var(--success); }
-.verdict.good { background: rgba(58,155,220,0.15); color: #3A9BDC; }
-.verdict.bad { background: rgba(251,191,36,0.15); color: #fbbf24; }
-.verdict.terrible { background: rgba(248,113,113,0.15); color: var(--danger); }
-.show-more {
-  width: 100%; margin-top: 8px; padding: 10px; background: var(--bg-primary);
-  border: 1px solid var(--border-color); border-radius: var(--radius-sm);
-  color: var(--accent); font-weight: 600; font-size: 13px; cursor: pointer;
+.empty-hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 12px;
 }
 
-.games-table-card { padding: 0; overflow: hidden; }
-.table-title { padding: 16px 16px 0; margin: 0 0 8px; font-size: 15px; }
-.games-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.card-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.table-title { padding: 14px 16px 0; }
+.games-table-card {
+  padding: 0 !important;
+  overflow: hidden;
+  width: 100%;
+}
+.games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
 .games-table th {
-  text-align: left; padding: 12px 16px; color: var(--text-secondary); font-weight: 600;
-  border-bottom: 1px solid var(--border-color); font-size: 11px; text-transform: uppercase;
+  text-align: left;
+  padding: 10px 16px;
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 10px;
+  text-transform: uppercase;
 }
-.games-table td { padding: 12px 16px; border-bottom: 1px solid var(--border-color); }
-.game-cell { font-weight: 600; }
-.platform-tag { font-size: 11px; color: var(--accent); font-weight: 700; text-transform: uppercase; }
-.hours-cell { font-weight: 600; }
+.games-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+.games-table tr:last-child td { border-bottom: none; }
+.game-cell { font-weight: 500; }
+.platform-tag {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.hours-cell {
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
 
 .state-message {
-  padding: 60px 20px; text-align: center; color: var(--text-secondary);
-  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
 }
-.error-state { color: var(--danger); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.error-state {
+  color: var(--danger);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
 .retry-btn {
-  background: var(--bg-card-hover); border: 1px solid var(--border-color);
-  color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .profile-header { flex-direction: column; align-items: stretch; }
+  .avatar-big { width: 56px; height: 56px; }
+  .games-table-card { overflow-x: auto; }
+  .games-table { min-width: 420px; }
+  .gh-bar { max-width: none; }
 }
 </style>

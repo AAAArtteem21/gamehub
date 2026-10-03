@@ -165,21 +165,44 @@ class PublicProfileView(APIView):
             try:
                 serialized = GameAccountSerializer(acc, context={"request": request}).data
                 accounts_data.append(serialized)
-            except Exception as e:
-                # не роняем весь профиль из-за одного проблемного аккаунта —
-                # пропускаем его, но остальные данные юзер всё равно увидит
+            except Exception:
                 continue
 
         profile = getattr(user, "profile", None)
 
+        # GH progress (публично: level / xp / tags, без referral_code)
+        progress = None
+        if profile is not None:
+            level = getattr(profile, "level", 1) or 1
+            xp = getattr(profile, "xp", 0) or 0
+            xp_per = getattr(profile, "xp_per_level", None) or 100
+            # если xp хранится cumulative — подстрой под свою схему
+            xp_into = getattr(profile, "xp_into_level", None)
+            if xp_into is None:
+                xp_into = xp % xp_per if xp_per else 0
+            pct = int(min(100, round((xp_into / xp_per) * 100))) if xp_per else 0
+            tags = getattr(profile, "tags", None) or []
+            if isinstance(tags, str):
+                tags = [tags]
+            progress = {
+                "level": level,
+                "xp_into_level": xp_into,
+                "xp_per_level": xp_per,
+                "pct": pct,
+                "tags": list(tags) if tags else [],
+            }
+
         return Response({
+            "id": user.id,
             "username": user.username,
-            "display_name": profile.display_name if profile else user.username,
+            "display_name": profile.display_name if profile and profile.display_name else user.username,
             "avatar_url": profile.avatar_url if profile else None,
+            "steam_id": getattr(profile, "steam_id", None) if profile else None,
             "views_count": views_count,
+            "accounts_count": len(accounts_data),
+            "progress": progress,
             "accounts": accounts_data,
         })
-
 class WorldLeaderboardView(APIView):
     """
     GET /api/world-leaderboard/?game=dota2|lol — топ игроков из открытых источников,
@@ -515,10 +538,15 @@ class MatchParticipantsView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, game, match_id):
+        game = (game or "").lower()
+        if game in ("opendota", "dota"):
+            game = "dota2"
         if game == "dota2":
             return self._dota_participants(match_id)
         if game == "valorant":
             return self._valorant_participants(match_id)
+        if game == "faceit":
+            return self._faceit_participants(match_id)
         return Response({"detail": "Игра не поддерживается"}, status=400)
 
     def _dota_participants(self, match_id):
@@ -621,6 +649,125 @@ class MatchParticipantsView(APIView):
             "participants": participants,
             "radiant_win": detail.get("radiant_win"),
             "duration": detail.get("duration"),
+        })
+    def _faceit_participants(self, match_id):
+        from .integrations.faceit_client import FaceitClient, FaceitError
+
+        client = FaceitClient()
+        try:
+            detail = client.get_match(match_id)
+        except FaceitError as e:
+            return Response({"detail": str(e)}, status=404)
+        except Exception:
+            return Response({"detail": "Матч не найден"}, status=404)
+
+        stats_payload = {}
+        try:
+            stats_payload = client.get_match_stats(match_id) or {}
+        except Exception:
+            stats_payload = {}
+
+        # player_id -> aggregated stats from rounds
+        per_player = {}
+        rounds_out = []
+        for ri, rnd in enumerate(stats_payload.get("rounds") or []):
+            round_stats = rnd.get("teams") or []
+            kill_rows = []
+            for team in round_stats:
+                team_label = team.get("team_id") or team.get("team") or "?"
+                for pl in team.get("players") or []:
+                    pid = pl.get("player_id")
+                    if not pid:
+                        continue
+                    st = pl.get("player_stats") or {}
+                    if pid not in per_player:
+                        per_player[pid] = {
+                            "kills": 0, "deaths": 0, "assists": 0,
+                            "headshots": 0, "mvps": 0, "nickname": pl.get("nickname"),
+                        }
+                    try:
+                        per_player[pid]["kills"] += int(st.get("Kills") or st.get("kills") or 0)
+                        per_player[pid]["deaths"] += int(st.get("Deaths") or st.get("deaths") or 0)
+                        per_player[pid]["assists"] += int(st.get("Assists") or st.get("assists") or 0)
+                        per_player[pid]["headshots"] += int(st.get("Headshots") or 0)
+                        per_player[pid]["mvps"] += int(st.get("MVPs") or st.get("MVP") or 0)
+                    except (TypeError, ValueError):
+                        pass
+                    if pl.get("nickname"):
+                        per_player[pid]["nickname"] = pl.get("nickname")
+
+            rounds_out.append({
+                "round_number": ri + 1,
+                "round_stats": "ok",
+                "winner": rnd.get("round_stats", {}).get("Winner") if isinstance(rnd.get("round_stats"), dict) else None,
+            })
+
+        teams = detail.get("teams") or {}
+        f1 = teams.get("faction1") or {}
+        f2 = teams.get("faction2") or {}
+
+        def pack_team(faction, side_key):
+            roster = []
+            for pl in faction.get("roster") or []:
+                pid = pl.get("player_id")
+                nick = pl.get("nickname") or (per_player.get(pid) or {}).get("nickname") or "?"
+                ps = per_player.get(pid) or {}
+                k = ps.get("kills", 0)
+                d = ps.get("deaths", 0)
+                a = ps.get("assists", 0)
+
+                gh = GameAccount.objects.filter(
+                    platform="faceit",
+                    external_id__iexact=nick,
+                ).select_related("user").first()
+                if not gh and pid:
+                    gh = GameAccount.objects.filter(
+                        platform="faceit",
+                        external_id=str(pid),
+                    ).select_related("user").first()
+
+                roster.append({
+                    "player_id": pid,
+                    "nickname": nick,
+                    "display_name": nick,
+                    "avatar": pl.get("avatar"),
+                    "team": side_key,
+                    "kda": f"{k}/{d}/{a}",
+                    "kills": k,
+                    "deaths": d,
+                    "assists": a,
+                    "headshots": ps.get("headshots", 0),
+                    "mvps": ps.get("mvps", 0),
+                    "is_gamehub_user": bool(gh),
+                    "gamehub_user_id": gh.user_id if gh else None,
+                })
+            return roster
+
+        team1 = pack_team(f1, "faction1")
+        team2 = pack_team(f2, "faction2")
+        participants = team1 + team2
+
+        results = detail.get("results") or {}
+        score = results.get("score") or {}
+        winner = results.get("winner")
+
+        return Response({
+            "game": "faceit",
+            "map": (detail.get("voting") or {}).get("map", {}).get("pick")
+                or detail.get("map")
+                or (detail.get("round_stats") or {}).get("Map")
+                or "?",
+            "competition": detail.get("competition_name") or detail.get("competition_id"),
+            "started_at": detail.get("started_at"),
+            "finished_at": detail.get("finished_at"),
+            "faction1_name": f1.get("name") or "Team 1",
+            "faction2_name": f2.get("name") or "Team 2",
+            "faction1_score": score.get("faction1"),
+            "faction2_score": score.get("faction2"),
+            "winner": winner,
+            "participants": participants,
+            "rounds_count": len(rounds_out),
+            "rounds": rounds_out,
         })
 
     def _valorant_participants(self, match_id):
