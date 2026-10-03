@@ -21,6 +21,7 @@ const matchGame = computed(() => {
   const p = String(props.platform || '').toLowerCase()
   if (p === 'valorant') return 'valorant'
   if (p === 'opendota' || p === 'dota2') return 'dota2'
+  if (p === 'faceit') return 'faceit'
   return null
 })
 
@@ -102,6 +103,12 @@ function closeMatch() {
     />
     <ValorantMatchModal
       v-if="openMatchId && matchGame === 'valorant'"
+      :match-id="openMatchId"
+      @close="closeMatch"
+    />
+    <MatchParticipantsModal
+      v-if="openMatchId && matchGame === 'faceit'"
+      game="faceit"
       :match-id="openMatchId"
       @close="closeMatch"
     />

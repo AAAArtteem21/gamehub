@@ -179,6 +179,9 @@ function openMatch(matchId) {
   } else if (p === 'opendota' || p === 'dota2') {
     openMatchGame.value = 'dota2'
     openMatchId.value = matchId
+  } else if (p === 'faceit') {
+    openMatchGame.value = 'faceit'
+    openMatchId.value = matchId
   }
 }
 
@@ -422,6 +425,12 @@ onMounted(() => {
     />
     <ValorantMatchModal
       v-if="openMatchId && openMatchGame === 'valorant'"
+      :match-id="openMatchId"
+      @close="closeMatch"
+    />
+    <MatchParticipantsModal
+      v-if="openMatchId && openMatchGame === 'faceit'"
+      game="faceit"
       :match-id="openMatchId"
       @close="closeMatch"
     />
