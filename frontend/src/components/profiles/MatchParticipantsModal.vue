@@ -46,6 +46,7 @@ function canOpenProfile(p) {
   if (p.is_gamehub_user && p.gamehub_user_id) return true
   if (p.account_id) return true
   if (p.riot_id) return true
+  if (resolvedGame.value === 'faceit' && (p.nickname || p.display_name || p.player_id)) return true
   return false
 }
 
@@ -81,7 +82,7 @@ async function load() {
 }
 
 function goToPlayer(p) {
-  if (!canOpenProfile(p)) return
+  if (!p) return
   emit('close')
   if (p.is_gamehub_user && p.gamehub_user_id) {
     router.push(`/players/${p.gamehub_user_id}`)
@@ -93,6 +94,14 @@ function goToPlayer(p) {
   }
   if (resolvedGame.value === 'valorant' && p.riot_id) {
     router.push(`/players/guest/valorant/${encodeURIComponent(p.riot_id)}`)
+    return
+  }
+  // Faceit: ник или player_id
+  if (resolvedGame.value === 'faceit') {
+    const id = p.nickname || p.display_name || p.player_id
+    if (id) {
+      router.push(`/players/guest/faceit/${encodeURIComponent(id)}`)
+    }
   }
 }
 

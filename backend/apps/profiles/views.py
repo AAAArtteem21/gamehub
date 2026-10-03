@@ -330,10 +330,227 @@ class GuestProfileView(APIView):
             return self._dota_guest(external_id)
         if game == "valorant":
             return self._valorant_guest(external_id)
+        if game == "faceit":
+            return self._faceit_guest(external_id)
         return Response(
             {"detail": "Гостевой просмотр поддерживается для dota2 и valorant"},
             status=400,
         )
+
+    def _faceit_guest(self, external_id):
+        from .integrations.faceit_client import FaceitClient, FaceitError
+        from .serivces import build_display_stats  # или services
+
+        raw = (external_id or "").strip()
+        if not raw:
+            return Response({"detail": "Укажи ник Faceit"}, status=400)
+
+        client = FaceitClient()
+        try:
+            if len(raw) >= 32 and "-" in raw:
+                player = client.get_player(raw)
+            else:
+                player = client.get_player_by_nickname(raw)
+        except FaceitError as e:
+            return Response({"detail": str(e)}, status=404)
+        except Exception:
+            return Response({"detail": "Игрок не найден"}, status=404)
+
+        player_id = player.get("player_id")
+        nickname = player.get("nickname") or raw
+        games = player.get("games") or {}
+        game_id = "cs2" if games.get("cs2") else ("csgo" if games.get("csgo") else "cs2")
+        ginfo = games.get(game_id) or {}
+
+        skill_level = ginfo.get("skill_level")
+        faceit_elo = ginfo.get("faceit_elo")
+        try:
+            skill_level = int(skill_level) if skill_level is not None else None
+        except (TypeError, ValueError):
+            skill_level = None
+        try:
+            faceit_elo = int(faceit_elo) if faceit_elo is not None else None
+        except (TypeError, ValueError):
+            faceit_elo = None
+
+        lifetime = {}
+        top_maps = []
+        matches_total = wins = 0
+        winrate = kd = hs = avg_kills = avg_deaths = adr = entry_rate = None
+
+        try:
+            stats_payload = client.get_player_stats(player_id, game_id)
+            lifetime = stats_payload.get("lifetime") or {}
+
+            def L(*keys, default=None):
+                for k in keys:
+                    if k in lifetime and lifetime[k] not in (None, ""):
+                        return lifetime[k]
+                return default
+
+            def fnum(v, nd=1):
+                if v is None:
+                    return None
+                try:
+                    return round(float(str(v).replace(",", ".")), nd)
+                except (TypeError, ValueError):
+                    return None
+
+            matches_total = int(float(L("Matches", "matches", default=0) or 0))
+            wins = int(float(L("Wins", "wins", default=0) or 0))
+            winrate = fnum(L("Win Rate %", "Winrate %")) or (
+                round(wins / matches_total * 100, 1) if matches_total else 0
+            )
+            kd = fnum(L("Average K/D Ratio", "K/D Ratio", "K/D"), 2)
+            hs = fnum(L("Average Headshots %", "Headshots %"), 1)
+            avg_kills = fnum(L("Average Kills", "Kills"), 1)
+            avg_deaths = fnum(L("Average Deaths", "Deaths"), 1)
+            adr = fnum(L("ADR", "Average Damage per Round", "Damage/Round"), 1)
+            entry_rate = fnum(L("Entry Success Rate", "Entry Rate %"), 1)
+
+            for seg in stats_payload.get("segments") or []:
+                label = (seg.get("label") or "").strip()
+                st = seg.get("stats") or {}
+                is_map = (
+                    (seg.get("type") or "").lower() == "map"
+                    or label.lower().startswith("de_")
+                    or label.lower().startswith("cs_")
+                )
+                if not is_map or not label:
+                    continue
+                try:
+                    m_matches = int(float(st.get("Matches") or st.get("matches") or 0))
+                except (TypeError, ValueError):
+                    m_matches = 0
+                if m_matches <= 0:
+                    continue
+                try:
+                    m_wins = int(float(st.get("Wins") or st.get("wins") or 0))
+                except (TypeError, ValueError):
+                    m_wins = 0
+                m_wr = fnum(st.get("Win Rate %") or st.get("Winrate %")) or (
+                    round(m_wins / m_matches * 100, 1) if m_matches else 0
+                )
+                m_kd = fnum(st.get("Average K/D Ratio") or st.get("K/D Ratio"), 2)
+                top_maps.append({
+                    "name": label,
+                    "matches": m_matches,
+                    "winrate": m_wr,
+                    "kd": m_kd,
+                })
+            top_maps.sort(key=lambda x: x["matches"], reverse=True)
+            top_maps = top_maps[:8]
+        except Exception:
+            pass
+
+        # recent matches
+        match_history = []
+        form = []
+        try:
+            recent = client.get_recent_match_stats(player_id, game_id, limit=20)
+            for item in (recent.get("items") or [])[:20]:
+                st = item.get("stats") or {}
+                def S(*keys, default=None):
+                    for k in keys:
+                        if k in st and st[k] not in (None, ""):
+                            return st[k]
+                    return default
+
+                match_id = item.get("match_id") or item.get("matchId") or S("Match Id")
+                if match_id is not None:
+                    match_id = str(match_id)
+
+                result = S("Result", "result")
+                won = True if str(result) in ("1", "Win", "win") else (
+                    False if str(result) in ("0", "Loss", "loss") else None
+                )
+                k = S("Kills", "kills") or "0"
+                d = S("Deaths", "deaths") or "0"
+                a = S("Assists", "assists") or "0"
+                kd_m = S("K/D Ratio", "K/D")
+                hs_m = S("Headshots %", "HS %")
+                map_name = S("Map", "map") or "—"
+                score = S("Score", "score")
+
+                try:
+                    kd_f = float(str(kd_m).replace(",", "."))
+                    if kd_f >= 1.4:
+                        verdict = {"label": "Great", "tone": "great"}
+                    elif kd_f >= 1.1:
+                        verdict = {"label": "Good", "tone": "good"}
+                    elif kd_f >= 0.85:
+                        verdict = {"label": "OK", "tone": "neutral"}
+                    elif kd_f >= 0.6:
+                        verdict = {"label": "Bad", "tone": "bad"}
+                    else:
+                        verdict = {"label": "Rough", "tone": "terrible"}
+                except Exception:
+                    verdict = None
+
+                if won is True:
+                    form.append("W")
+                elif won is False:
+                    form.append("L")
+
+                match_history.append({
+                    "won": won,
+                    "title": map_name,
+                    "subtitle": f"{k}/{d}/{a}" + (f" · KD {kd_m}" if kd_m else ""),
+                    "match_id": match_id,
+                    "verdict": verdict,
+                    "details": [
+                        {"label": "Счёт", "value": score or "—"},
+                        {"label": "K/D", "value": kd_m or "—"},
+                        {"label": "HS %", "value": hs_m or "—"},
+                        {"label": "Карта", "value": map_name},
+                    ],
+                })
+        except Exception:
+            pass
+
+        extra = {
+            "player_id": player_id,
+            "game_id": game_id,
+            "skill_level": skill_level,
+            "faceit_elo": faceit_elo,
+            "matches": matches_total,
+            "wins": wins,
+            "winrate": winrate,
+            "kd": kd,
+            "hs_percent": hs,
+            "avg_kills": avg_kills,
+            "avg_deaths": avg_deaths,
+            "adr": adr,
+            "entry_success": entry_rate,
+            "top_maps": top_maps,
+            "recent_form": form[:10],
+            "match_history": match_history,
+            "country": player.get("country"),
+            "avatar": player.get("avatar"),
+        }
+
+        display = build_display_stats("faceit", extra)
+
+        return Response({
+            "platform": "faceit",
+            "game": "faceit",
+            "external_id": nickname,
+            "display_name": nickname,
+            "avatar_url": player.get("avatar"),
+            "tier": f"Level {skill_level}" if skill_level is not None else None,
+            "rr": faceit_elo,
+            "wins": wins,
+            "matches": matches_total,
+            "winrate": winrate,
+            "kd": kd,
+            "hs_percent": hs,
+            "skill_level": skill_level,
+            "faceit_elo": faceit_elo,
+            "match_history": match_history,
+            "display_stats": display,
+            "is_gamehub": False,
+            "source_label": "Данные Faceit (открытый API)",
+        })
 
     def _dota_guest(self, external_id):
         from .integrations.opendota_client import OpenDotaClient
