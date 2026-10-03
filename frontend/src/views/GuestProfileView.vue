@@ -34,11 +34,12 @@ const winrate = computed(() => {
   return Math.round((w / t) * 1000) / 10
 })
 
-const sourceLabel = computed(() =>
-  game.value === 'valorant'
-    ? 'Данные Valorant (открытый API)'
-    : 'Данные из открытого источника (OpenDota)'
-)
+const sourceLabel = computed(() => {
+  const g = String(game.value || '').toLowerCase()
+  if (g === 'valorant') return 'Данные Valorant (открытый API)'
+  if (g === 'faceit') return 'Данные Faceit (открытый API)'
+  return 'Данные из открытого источника (OpenDota)'
+})
 
 function gPlatform() {
   if (game.value === 'dota2' || game.value === 'opendota') return 'opendota'
@@ -124,10 +125,16 @@ function showMoreHistory() {
 
 function openMatch(m) {
   if (!m?.match_id) return
-  openMatchGame.value = game.value === 'valorant' ? 'valorant' : 'dota2'
+  const g = String(game.value || '').toLowerCase()
+  if (g === 'valorant') {
+    openMatchGame.value = 'valorant'
+  } else if (g === 'faceit') {
+    openMatchGame.value = 'faceit'
+  } else {
+    openMatchGame.value = 'dota2'
+  }
   openMatchId.value = m.match_id
 }
-
 function closeMatch() {
   openMatchId.value = null
   openMatchGame.value = null
@@ -252,6 +259,12 @@ watch(() => [route.params.game, route.params.externalId], () => load())
     <MatchParticipantsModal
       v-if="openMatchId && openMatchGame === 'dota2'"
       game="dota2"
+      :match-id="openMatchId"
+      @close="closeMatch"
+    />
+    <MatchParticipantsModal
+      v-if="openMatchId && openMatchGame === 'faceit'"
+      game="faceit"
       :match-id="openMatchId"
       @close="closeMatch"
     />

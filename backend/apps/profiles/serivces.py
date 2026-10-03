@@ -1205,25 +1205,33 @@ def build_display_stats(platform, extra_stats):
         matches = extra_stats.get("matches") or 0
         wins = extra_stats.get("wins") or 0
         game_id = (extra_stats.get("game_id") or "cs2").upper()
+        avg_k = extra_stats.get("avg_kills")
+        avg_d = extra_stats.get("avg_deaths")
+        adr = extra_stats.get("adr")
+        entry = extra_stats.get("entry_success")
 
         metrics = [
             {"label": "матчей", "value": matches},
             {"label": "побед", "value": wins, "tone": "win"},
-            {
-                "label": "винрейт",
-                "value": f"{wr}%" if wr is not None else "—",
-                "tone": "accent",
-            },
+            {"label": "винрейт", "value": f"{wr}%" if wr is not None else "—", "tone": "accent"},
             {"label": "K/D", "value": kd if kd is not None else "—", "tone": "accent"},
         ]
         if elo is not None:
             metrics.append({"label": "ELO", "value": elo, "tone": "accent"})
         if skill is not None:
             metrics.append({"label": "LVL", "value": skill})
+        if avg_k is not None:
+            metrics.append({"label": "ср. килы", "value": avg_k})
+        if adr is not None:
+            metrics.append({"label": "ADR", "value": adr, "tone": "accent"})
 
         tags = []
         if hs is not None:
             tags.append({"label": f"HS {hs}%"})
+        if avg_d is not None:
+            tags.append({"label": f"ср. смерти {avg_d}"})
+        if entry is not None:
+            tags.append({"label": f"Entry {entry}%"})
         if extra_stats.get("country"):
             tags.append({"label": str(extra_stats["country"]).upper()})
         form = extra_stats.get("recent_form") or []
@@ -1243,7 +1251,7 @@ def build_display_stats(platform, extra_stats):
 
         return {
             "game_label": extra_stats.get("game_label") or f"Faceit {game_id}",
-            "metrics": metrics,
+            "metrics": metrics[:8],
             "badge": f"Level {skill}" if skill is not None else "Faceit",
             "tags": tags,
             "list_title": "Топ карты" if list_rows else "",
@@ -1254,6 +1262,9 @@ def build_display_stats(platform, extra_stats):
                 {"name": "ELO", "value": elo if elo is not None else "—"},
                 {"name": "Уровень", "value": skill if skill is not None else "—"},
                 {"name": "HS %", "value": hs if hs is not None else "—"},
+                {"name": "ADR", "value": adr if adr is not None else "—"},
+                {"name": "Entry success", "value": f"{entry}%" if entry is not None else "—"},
+                {"name": "Ср. килы / смерти", "value": f"{avg_k or '—'} / {avg_d or '—'}"},
             ],
             "match_history": extra_stats.get("match_history") or [],
         }
