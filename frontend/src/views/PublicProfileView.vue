@@ -38,14 +38,15 @@ const isMe = computed(() =>
 const statsAccounts = computed(() =>
   (profile.value?.accounts || []).filter(
     (a) =>
-      a.display_stats ||
-      ['opendota', 'faceit', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform) ||
-      (a.platform === 'steam' && a.display_stats)
-  ).filter((a) => a.display_stats)
+      a.display_stats &&
+      ['opendota', 'faceit', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform)
+  )
 )
 
 const activeAccount = computed(
-  () => statsAccounts.value.find((a) => a.id === activeTab.value) || statsAccounts.value[0] || null
+  () =>
+    statsAccounts.value.find((a) => a.id === activeStatsTab.value) ||
+    statsAccounts.value[0]
 )
 
 async function loadFav() {
@@ -239,7 +240,6 @@ watch(() => route.params.id, load)
             v-if="activeAccount?.display_stats"
             :stats="activeAccount.display_stats"
             :platform="activeAccount.platform"
-            @open-match="openMatch"
           />
           <div v-else class="empty-hint">Статистика ещё не синхронизирована</div>
         </div>

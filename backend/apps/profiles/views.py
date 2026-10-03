@@ -141,49 +141,38 @@ class LeaderboardView(APIView):
             })
         return Response(data)
 class PublicProfileView(APIView):
-    permission_classes = [permissions.AllowAny]
+    """GET /api/players/<user_id>/ — публичный профиль (как свой, без приватных действий)."""
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, user_id):
         from django.contrib.auth import get_user_model
-        from apps.users.models import ProfileView as ProfileViewModel
+        from .models import GameAccount
+        from .serivces import build_display_stats  # если файл services.py — from .services import ...
 
         User = get_user_model()
         try:
-            user = User.objects.get(id=user_id)
+            target = User.objects.select_related("profile").get(pk=user_id)
         except User.DoesNotExist:
-            return Response({"detail": "Игрок не найден"}, status=404)
+            return Response({"detail": "Пользователь не найден"}, status=404)
 
-        views_count = ProfileViewModel.objects.filter(viewed_user=user).count()
-        if request.user.is_authenticated and request.user.id != user.id:
-            ProfileViewModel.objects.create(viewer=request.user, viewed_user=user)
-            views_count += 1
+        profile = getattr(target, "profile", None)
 
-        accounts = GameAccount.objects.filter(user=user).prefetch_related("snapshots")
-
-        accounts_data = []
-        for acc in accounts:
-            try:
-                serialized = GameAccountSerializer(acc, context={"request": request}).data
-                accounts_data.append(serialized)
-            except Exception:
-                continue
-
-        profile = getattr(user, "profile", None)
-
-        # GH progress (публично: level / xp / tags, без referral_code)
+        # --- прогресс GH (без реф-кода) ---
         progress = None
         if profile is not None:
             level = getattr(profile, "level", 1) or 1
-            xp = getattr(profile, "xp", 0) or 0
+            xp_total = getattr(profile, "xp", 0) or 0
             xp_per = getattr(profile, "xp_per_level", None) or 100
-            # если xp хранится cumulative — подстрой под свою схему
+            if xp_per <= 0:
+                xp_per = 100
+            # если хранится xp_into_level — используй его, иначе посчитай
             xp_into = getattr(profile, "xp_into_level", None)
             if xp_into is None:
-                xp_into = xp % xp_per if xp_per else 0
-            pct = int(min(100, round((xp_into / xp_per) * 100))) if xp_per else 0
+                xp_into = xp_total % xp_per
+            pct = min(100, round(xp_into / xp_per * 100, 1)) if xp_per else 0
             tags = getattr(profile, "tags", None) or []
-            if isinstance(tags, str):
-                tags = [tags]
+            if callable(tags):
+                tags = tags()
             progress = {
                 "level": level,
                 "xp_into_level": xp_into,
@@ -192,17 +181,153 @@ class PublicProfileView(APIView):
                 "tags": list(tags) if tags else [],
             }
 
+        # --- просмотры (опционально) ---
+        views_count = 0
+        try:
+            from apps.users.models import ProfileView
+            if request.user.id != target.id:
+                ProfileView.objects.create(viewer=request.user, viewed_user=target)
+            views_count = ProfileView.objects.filter(viewed_user=target).count()
+        except Exception:
+            pass
+
+        # --- аккаунты + display_stats ---
+        accounts_qs = (
+            GameAccount.objects.filter(user=target).order_by("-created_at")
+        )
+        accounts_data = []
+        for acc in accounts_qs:
+            extra = dict(acc.extra_stats or {})
+            if acc.platform == "faceit":
+                extra = self._enrich_faceit_extra(extra)
+            elif acc.platform == "valorant":
+                extra = self._enrich_valorant_extra(extra)
+
+            accounts_data.append({
+                "id": acc.id,
+                "platform": acc.platform,
+                "external_id": acc.external_id,
+                "nickname": acc.nickname,
+                "avatar": acc.avatar,
+                "verified": acc.verified,
+                "game_label": acc.game_label,
+                "skill_rating": acc.skill_rating,
+                "last_synced_at": acc.last_synced_at,
+                "display_stats": build_display_stats(acc.platform, extra),
+            })
+
+        display_name = None
+        avatar_url = None
+        if profile is not None:
+            display_name = profile.display_name or None
+            avatar_url = profile.avatar_url or None
+
         return Response({
-            "id": user.id,
-            "username": user.username,
-            "display_name": profile.display_name if profile and profile.display_name else user.username,
-            "avatar_url": profile.avatar_url if profile else None,
+            "id": target.id,
+            "username": target.username,
+            "display_name": display_name or target.username,
+            "avatar_url": avatar_url,
             "steam_id": getattr(profile, "steam_id", None) if profile else None,
-            "views_count": views_count,
-            "accounts_count": len(accounts_data),
+            "bio": getattr(profile, "bio", "") if profile else "",
             "progress": progress,
+            "views_count": views_count,
+            "is_me": request.user.id == target.id,
             "accounts": accounts_data,
         })
+
+    @staticmethod
+    def _to_int(v, default=0):
+        try:
+            return int(float(str(v).replace(",", ".")))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _to_float(v, default=None):
+        if v is None or v == "":
+            return default
+        try:
+            return float(str(v).replace(",", "."))
+        except (TypeError, ValueError):
+            return default
+
+    def _enrich_faceit_extra(self, extra: dict) -> dict:
+        """Avg/ADR на лету, если в extra ещё нет (старый синк)."""
+        extra = dict(extra or {})
+        history = extra.get("match_history") or []
+
+        if extra.get("avg_kills") is None and history:
+            n = sk = sd = sa = 0
+            for m in history[:20]:
+                parts = (m.get("subtitle") or "").split("·")[0].strip().split("/")
+                if len(parts) >= 3:
+                    sk += self._to_int(parts[0])
+                    sd += self._to_int(parts[1])
+                    sa += self._to_int(parts[2])
+                    n += 1
+            if n:
+                extra["avg_kills"] = round(sk / n, 1)
+                extra["avg_deaths"] = round(sd / n, 1)
+                extra["avg_assists"] = round(sa / n, 1)
+                extra["avg_kd_recent"] = round((sk + sa) / max(sd, 1), 2)
+                extra["sample_size"] = n
+
+        life = extra.get("lifetime") or {}
+        if extra.get("adr") is None and life:
+            for key in ("ADR", "Average Damage per Round", "Damage/Round"):
+                if key in life and life[key] not in (None, ""):
+                    val = self._to_float(life[key])
+                    if val is not None:
+                        extra["adr"] = round(val, 1)
+                    break
+        if extra.get("entry_success") is None and life:
+            for key in ("Entry Success Rate", "Entry Rate %"):
+                if key in life and life[key] not in (None, ""):
+                    val = self._to_float(life[key])
+                    if val is not None:
+                        extra["entry_success"] = round(val, 1)
+                    break
+        if extra.get("kr") is None and life:
+            for key in ("K/R Ratio", "Average K/R Ratio", "Kills/Round"):
+                if key in life and life[key] not in (None, ""):
+                    val = self._to_float(life[key])
+                    if val is not None:
+                        extra["kr"] = round(val, 2)
+                    break
+
+        return extra
+
+    def _enrich_valorant_extra(self, extra: dict) -> dict:
+        extra = dict(extra or {})
+        history = extra.get("match_history") or []
+        if extra.get("avg_kills") is not None or not history:
+            return extra
+
+        n = sk = sd = sa = acs_sum = 0
+        for m in history[:20]:
+            parts = (m.get("subtitle") or "").split("/")
+            if len(parts) >= 3:
+                try:
+                    sk += int(parts[0])
+                    sd += int(parts[1])
+                    sa += int(str(parts[2]).split()[0])
+                    n += 1
+                except (TypeError, ValueError):
+                    pass
+            for det in m.get("details") or []:
+                if det.get("label") == "Combat Score (ACS)":
+                    try:
+                        acs_sum += int(det.get("value") or 0)
+                    except (TypeError, ValueError):
+                        pass
+        if n:
+            extra["avg_kills"] = round(sk / n, 1)
+            extra["avg_deaths"] = round(sd / n, 1)
+            extra["avg_assists"] = round(sa / n, 1)
+            extra["avg_kd_recent"] = round((sk + sa) / max(sd, 1), 2)
+            extra["avg_acs"] = round(acs_sum / n) if acs_sum else None
+            extra["sample_size"] = n
+        return extra
 class WorldLeaderboardView(APIView):
     """
     GET /api/world-leaderboard/?game=dota2|lol — топ игроков из открытых источников,
