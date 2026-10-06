@@ -45,8 +45,9 @@ const statsAccounts = computed(() =>
 
 const activeAccount = computed(
   () =>
-    statsAccounts.value.find((a) => a.id === activeStatsTab.value) ||
-    statsAccounts.value[0]
+    statsAccounts.value.find((a) => a.id === activeTab.value) ||
+    statsAccounts.value[0] ||
+    null
 )
 
 async function loadFav() {
@@ -127,13 +128,11 @@ function selectTab(id) {
 function openMatch(matchId) {
   if (!matchId || !activeAccount.value) return
   const p = String(activeAccount.value.platform || '').toLowerCase()
-  if (p === 'valorant') {
-    openMatchGame.value = 'valorant'
-    openMatchId.value = matchId
-  } else if (p === 'opendota' || p === 'dota2') {
-    openMatchGame.value = 'dota2'
-    openMatchId.value = matchId
-  }
+  if (p === 'valorant') openMatchGame.value = 'valorant'
+  else if (p === 'faceit') openMatchGame.value = 'faceit'
+  else if (p === 'opendota' || p === 'dota2') openMatchGame.value = 'dota2'
+  else return
+  openMatchId.value = matchId
 }
 
 function closeMatch() {
@@ -276,6 +275,12 @@ watch(() => route.params.id, load)
     />
     <ValorantMatchModal
       v-if="openMatchId && openMatchGame === 'valorant'"
+      :match-id="openMatchId"
+      @close="closeMatch"
+    />
+    <MatchParticipantsModal
+      v-if="openMatchId && openMatchGame === 'faceit'"
+      game="faceit"
       :match-id="openMatchId"
       @close="closeMatch"
     />

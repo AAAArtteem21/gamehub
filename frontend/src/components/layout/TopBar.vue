@@ -4,10 +4,15 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import IconSearch from '../icons/IconSearch.vue'
 import api from '../../api/axios'
+import { useTheme } from '../../composables/useTheme'
 
 const authStore = useAuthStore()
 const router = useRouter()
 const toggleSidebar = inject('toggleSidebar', () => {})
+
+const { theme, themes, setTheme } = useTheme()
+const themeOpen = ref(false)
+const themeRef = ref(null)
 
 const menuOpen = ref(false)
 const menuRef = ref(null)
@@ -42,7 +47,9 @@ async function markRead(ids = null) {
     } else {
       notifications.value = notifications.value.map((n) => ({ ...n, read: true }))
     }
-  } catch { /* */ }
+  } catch {
+    /* */
+  }
 }
 
 async function openNotifItem(n) {
@@ -54,16 +61,33 @@ async function openNotifItem(n) {
 function toggleNotif() {
   notifOpen.value = !notifOpen.value
   menuOpen.value = false
+  themeOpen.value = false
   if (notifOpen.value) loadNotifications()
 }
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value
   notifOpen.value = false
+  themeOpen.value = false
+}
+
+function toggleThemeMenu() {
+  themeOpen.value = !themeOpen.value
+  menuOpen.value = false
+  notifOpen.value = false
+}
+
+function pickTheme(id) {
+  setTheme(id)
+  themeOpen.value = false
 }
 
 async function handleLogout() {
-  try { await api.post('logout/') } catch { /* */ }
+  try {
+    await api.post('logout/')
+  } catch {
+    /* */
+  }
   authStore.logout()
   menuOpen.value = false
   router.push('/')
@@ -72,6 +96,7 @@ async function handleLogout() {
 function handleClickOutside(e) {
   if (menuRef.value && !menuRef.value.contains(e.target)) menuOpen.value = false
   if (notifRef.value && !notifRef.value.contains(e.target)) notifOpen.value = false
+  if (themeRef.value && !themeRef.value.contains(e.target)) themeOpen.value = false
 }
 
 function handleSearch() {
@@ -110,7 +135,9 @@ function pickPlayer(u) {
 }
 
 function onSearchBlur() {
-  setTimeout(() => { suggestOpen.value = false }, 150)
+  setTimeout(() => {
+    suggestOpen.value = false
+  }, 150)
 }
 
 function timeAgo(iso) {
@@ -128,6 +155,7 @@ function startNotifications() {
   clearInterval(notifTimer)
   notifTimer = setInterval(loadNotifications, 60000)
 }
+
 function stopNotifications() {
   clearInterval(notifTimer)
   notifications.value = []
@@ -138,7 +166,10 @@ onMounted(() => {
   if (authStore.isAuthenticated) startNotifications()
 })
 
-watch(() => authStore.isAuthenticated, (v) => (v ? startNotifications() : stopNotifications()))
+watch(
+  () => authStore.isAuthenticated,
+  (v) => (v ? startNotifications() : stopNotifications())
+)
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
@@ -180,7 +211,9 @@ onUnmounted(() => {
             class="suggest-av"
             :style="u.avatar_url ? { backgroundImage: `url(${u.avatar_url})` } : {}"
           >
-            <span v-if="!u.avatar_url">{{ (u.display_name || u.username || '?')[0]?.toUpperCase() }}</span>
+            <span v-if="!u.avatar_url">
+              {{ (u.display_name || u.username || '?')[0]?.toUpperCase() }}
+            </span>
           </div>
           <div class="suggest-text">
             <span class="suggest-name">{{ u.display_name }}</span>
@@ -191,9 +224,44 @@ onUnmounted(() => {
     </form>
 
     <div class="top-right">
+      <!-- Тема: видна всем -->
+      <div class="theme-wrap" ref="themeRef">
+        <button
+          type="button"
+          class="theme-btn"
+          title="Тема"
+          @click.stop="toggleThemeMenu"
+        >
+          ◐
+        </button>
+        <transition name="menu-fade">
+          <div class="theme-menu" v-if="themeOpen">
+            <button
+              v-for="t in themes"
+              :key="t.id"
+              type="button"
+              class="theme-item"
+              :class="{ active: theme === t.id }"
+              @click="pickTheme(t.id)"
+            >
+              <span class="theme-dot" :data-t="t.id" />
+              <span class="theme-meta">
+                <b>{{ t.label }}</b>
+                <small>{{ t.hint }}</small>
+              </span>
+            </button>
+          </div>
+        </transition>
+      </div>
+
       <template v-if="authStore.isAuthenticated">
         <div class="notif-wrap" ref="notifRef">
-          <button type="button" class="bell-btn" @click.stop="toggleNotif" title="Уведомления">
+          <button
+            type="button"
+            class="bell-btn"
+            title="Уведомления"
+            @click.stop="toggleNotif"
+          >
             <span class="bell-icon">🔔</span>
             <span v-if="unread" class="bell-badge">{{ unread > 9 ? '9+' : unread }}</span>
           </button>
@@ -202,7 +270,12 @@ onUnmounted(() => {
             <div class="notif-panel" v-if="notifOpen">
               <div class="notif-head">
                 <span>Уведомления</span>
-                <button v-if="unread" type="button" class="mark-all" @click="markRead()">
+                <button
+                  v-if="unread"
+                  type="button"
+                  class="mark-all"
+                  @click="markRead()"
+                >
                   Прочитать все
                 </button>
               </div>
@@ -231,13 +304,21 @@ onUnmounted(() => {
           <button type="button" class="user-trigger" @click.stop="toggleMenu">
             <div
               class="avatar"
-              :style="authStore.user?.avatar_url ? { backgroundImage: `url(${authStore.user.avatar_url})` } : {}"
+              :style="
+                authStore.user?.avatar_url
+                  ? { backgroundImage: `url(${authStore.user.avatar_url})` }
+                  : {}
+              "
             >
               <span v-if="!authStore.user?.avatar_url" class="avatar-fallback">
-                {{ (authStore.user?.display_name || authStore.user?.username || '?')[0]?.toUpperCase() }}
+                {{
+                  (authStore.user?.display_name || authStore.user?.username || '?')[0]?.toUpperCase()
+                }}
               </span>
             </div>
-            <span class="username">{{ authStore.user?.display_name || authStore.user?.username || '...' }}</span>
+            <span class="username">
+              {{ authStore.user?.display_name || authStore.user?.username || '...' }}
+            </span>
             <span class="chevron" :class="{ open: menuOpen }">⌄</span>
           </button>
 
@@ -254,7 +335,13 @@ onUnmounted(() => {
           </transition>
         </div>
       </template>
-      <button v-else type="button" class="login-btn" @click="authStore.loginWithSteam()">
+
+      <button
+        v-else
+        type="button"
+        class="login-btn"
+        @click="authStore.loginWithSteam()"
+      >
         Войти через Steam
       </button>
     </div>
@@ -324,7 +411,10 @@ onUnmounted(() => {
   z-index: 1;
   display: flex;
 }
-.search-icon svg { width: 15px; height: 15px; }
+.search-icon svg {
+  width: 15px;
+  height: 15px;
+}
 .search input {
   width: 100%;
   background: var(--bg-sunken);
@@ -363,7 +453,9 @@ onUnmounted(() => {
   color: inherit;
   text-align: left;
 }
-.suggest-item:hover { background: var(--bg-card-hover); }
+.suggest-item:hover {
+  background: var(--bg-card-hover);
+}
 .suggest-av {
   width: 28px;
   height: 28px;
@@ -379,9 +471,19 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--accent);
 }
-.suggest-text { display: flex; flex-direction: column; min-width: 0; }
-.suggest-name { font-size: 13px; font-weight: 600; }
-.suggest-user { font-size: 11px; color: var(--text-secondary); }
+.suggest-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.suggest-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.suggest-user {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
 
 .top-right {
   display: flex;
@@ -390,7 +492,95 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.notif-wrap { position: relative; }
+/* —— theme —— */
+.theme-wrap {
+  position: relative;
+}
+.theme-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.theme-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.theme-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.theme-item:hover {
+  background: var(--bg-card-hover);
+}
+.theme-item.active {
+  background: var(--accent-dim);
+}
+.theme-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.theme-meta b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.theme-meta small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.theme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--border-color);
+}
+.theme-dot[data-t='crimson'] {
+  background: #e63946;
+}
+.theme-dot[data-t='slate'] {
+  background: #d97b3f;
+}
+.theme-dot[data-t='mono'] {
+  background: #ff2d2d;
+  box-shadow: inset 0 0 0 3px #111;
+}
+
+.notif-wrap {
+  position: relative;
+}
 .bell-btn {
   position: relative;
   width: 36px;
@@ -407,7 +597,10 @@ onUnmounted(() => {
   border-color: var(--border-hover);
   background: var(--bg-card-hover);
 }
-.bell-icon { font-size: 15px; line-height: 1; }
+.bell-icon {
+  font-size: 15px;
+  line-height: 1;
+}
 .bell-badge {
   position: absolute;
   top: -4px;
@@ -417,7 +610,7 @@ onUnmounted(() => {
   padding: 0 4px;
   border-radius: 999px;
   background: var(--accent);
-  color: #12100c;
+  color: #fff;
   font-size: 10px;
   font-weight: 700;
   display: flex;
@@ -474,8 +667,12 @@ onUnmounted(() => {
   text-align: left;
   cursor: pointer;
 }
-.notif-item:hover { background: var(--bg-card-hover); }
-.notif-item.unread { background: var(--accent-dim); }
+.notif-item:hover {
+  background: var(--bg-card-hover);
+}
+.notif-item.unread {
+  background: var(--accent-dim);
+}
 .notif-body {
   flex: 1;
   min-width: 0;
@@ -483,7 +680,10 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 3px;
 }
-.notif-body b { font-size: 13px; font-weight: 600; }
+.notif-body b {
+  font-size: 13px;
+  font-weight: 600;
+}
 .notif-body span {
   font-size: 12px;
   color: var(--text-secondary);
@@ -502,7 +702,9 @@ onUnmounted(() => {
   color: var(--text-muted);
 }
 
-.user-block { position: relative; }
+.user-block {
+  position: relative;
+}
 .user-trigger {
   display: flex;
   align-items: center;
@@ -513,7 +715,9 @@ onUnmounted(() => {
   padding: 4px 8px 4px 4px;
   border-radius: var(--radius-sm);
 }
-.user-trigger:hover { background: var(--bg-card-hover); }
+.user-trigger:hover {
+  background: var(--bg-card-hover);
+}
 .avatar {
   width: 32px;
   height: 32px;
@@ -546,7 +750,9 @@ onUnmounted(() => {
   font-size: 12px;
   transition: transform 0.15s;
 }
-.chevron.open { transform: rotate(180deg); }
+.chevron.open {
+  transform: rotate(180deg);
+}
 
 .dropdown {
   position: absolute;
@@ -579,7 +785,9 @@ onUnmounted(() => {
   width: 100%;
   text-align: left;
 }
-.dropdown-item:hover { background: var(--bg-card-hover); }
+.dropdown-item:hover {
+  background: var(--bg-card-hover);
+}
 .dropdown-item.danger:hover {
   background: rgba(201, 122, 114, 0.12);
   color: var(--danger);
@@ -606,7 +814,9 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
-  .burger { display: flex; }
+  .burger {
+    display: flex;
+  }
   .topbar {
     padding: 0 12px;
     gap: 10px;
@@ -616,8 +826,12 @@ onUnmounted(() => {
     width: auto;
     max-width: none;
   }
-  .username { display: none; }
-  .chevron { display: none; }
+  .username {
+    display: none;
+  }
+  .chevron {
+    display: none;
+  }
 }
 
 @media (max-width: 480px) {
