@@ -350,6 +350,14 @@ watch(
   margin: 0;
   box-sizing: border-box;
 }
+.side {
+  min-width: 0;
+  width: 100%;
+}
+.diff-bar {
+  width: 100%;
+  box-sizing: border-box;
+}
 .back {
   align-self: flex-start;
   background: none;
