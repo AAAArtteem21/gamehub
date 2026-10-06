@@ -17,6 +17,7 @@ from .serializers import UserProfileSerializer
 from django.middleware.csrf import get_token
 from django.http import HttpResponse
 from django.conf import settings
+from django.db import connection
 
 @ensure_csrf_cookie
 def get_csrf_token(request):
@@ -190,3 +191,12 @@ class ReferralClaimView(APIView):
             "detail": "Реферал активирован",
             "progress": progress_payload(me),
         })
+
+def health(request):
+    try:
+        connection.ensure_connection()
+        db = "ok"
+    except Exception:
+        db = "error"
+        return JsonResponse({"status": "error", "db": db}, status=503)
+    return JsonResponse({"status": "ok", "db": db})

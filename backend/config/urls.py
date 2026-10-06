@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.urls import path,include
 from django.conf import settings
 from django.conf.urls.static import static
+from apps.users.views import health
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -11,6 +12,7 @@ urlpatterns = [
     path('api/',include('apps.lfg.urls')),
     path('api/',include('apps.profiles.urls')),
     path('api/',include('apps.clans.urls')),
+    path("health/", health),
 ]
 
 if settings.DEBUG:
