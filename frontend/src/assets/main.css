@@ -91,6 +91,54 @@
   --warning: #e6b422;
 }
 
+[data-theme="ivory"] {
+  --bg-primary: #0c0c0c;
+  --bg-card: #141414;
+  --bg-card-hover: #1c1c1c;
+  --bg-sunken: #080808;
+  --border-color: #2e2e2e;
+  --border-hover: #454545;
+
+  --accent: #f2f2f2;
+  --accent-hover: #ffffff;
+  --accent-dim: rgba(255, 255, 255, 0.08);
+  --accent-ring: rgba(255, 255, 255, 0.18);
+  --accent-2: #a8a8a8;
+  --accent-2-dim: rgba(168, 168, 168, 0.12);
+
+  --text-primary: #f0f0f0;
+  --text-secondary: #9a9a9a;
+  --text-muted: #5c5c5c;
+
+  --success: #c8c8c8;
+  --danger: #e8e8e8;
+  --warning: #b0b0b0;
+}
+
+[data-theme="ivory"] .btn-primary {
+  background: #f2f2f2;
+  color: #0a0a0a;
+  border-color: #f2f2f2;
+}
+
+[data-theme="ivory"] .btn-primary:hover:not(:disabled) {
+  background: #fff;
+  color: #000;
+}
+
+[data-theme="ivory"] .bell-badge {
+  color: #0a0a0a;
+}
+
+[data-theme="ivory"] .rank-badge {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="ivory"] ::selection {
+  background: rgba(255, 255, 255, 0.25);
+  color: #000;
+}
+
 *,
 *::before,
 *::after {

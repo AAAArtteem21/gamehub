@@ -277,18 +277,51 @@ class ComparePlayersView(APIView):
         s = acc.extra_stats or {}
         history = s.get("match_history") or []
 
-        wins = s.get("wins")
-        losses = s.get("losses")
+        def as_int(v, default=None):
+            if v is None or v == "":
+                return default
+            try:
+                return int(float(str(v).replace(",", ".")))
+            except (TypeError, ValueError):
+                return default
+
+        wins = as_int(s.get("wins"), None)
         if wins is None:
-            wins = s.get("matches_won") or 0
+            wins = as_int(s.get("matches_won"), None)
+        losses = as_int(s.get("losses"), None)
         if losses is None:
-            losses = 0
-        if not wins and not losses and history:
+            losses = as_int(s.get("matches_lost"), None)
+        matches_extra = as_int(s.get("matches"), None)
+
+        # Faceit: lifetime Matches + Wins → losses
+        if (losses is None or losses == 0) and matches_extra and wins is not None:
+            if matches_extra > wins:
+                losses = matches_extra - wins
+
+        # история, если всё ещё пусто
+        if (wins is None or wins == 0) and (losses is None or losses == 0) and history:
             wins = sum(1 for m in history if m.get("won") is True)
             losses = sum(1 for m in history if m.get("won") is False)
+        elif (losses is None or losses == 0) and history:
+            l_h = sum(1 for m in history if m.get("won") is False)
+            if l_h:
+                losses = l_h
 
-        total = (wins or 0) + (losses or 0)
-        winrate = round(wins / total * 100, 1) if total else float(s.get("winrate") or 0)
+        wins = wins or 0
+        losses = losses or 0
+        total = wins + losses
+        if matches_extra and matches_extra > total:
+            total = matches_extra
+            if losses == 0 and wins and total > wins:
+                losses = total - wins
+
+        winrate = s.get("winrate")
+        try:
+            winrate = round(float(winrate), 1) if winrate is not None else None
+        except (TypeError, ValueError):
+            winrate = None
+        if winrate is None:
+            winrate = round(wins / total * 100, 1) if total else 0
 
         k_sum = d_sum = a_sum = kda_n = 0
         for m in history[:30]:
@@ -336,44 +369,33 @@ class ComparePlayersView(APIView):
             else:
                 break
 
-        faceit_elo = s.get("faceit_elo")
+        faceit_elo = as_int(s.get("faceit_elo"), None)
         if faceit_elo is None:
-            faceit_elo = s.get("elo")
-        try:
-            faceit_elo = int(faceit_elo) if faceit_elo is not None else None
-        except (TypeError, ValueError):
-            faceit_elo = None
+            faceit_elo = as_int(s.get("elo"), None)
 
-        skill_level = s.get("skill_level")
+        skill_level = as_int(s.get("skill_level"), None)
         if skill_level is None:
-            skill_level = s.get("level")
-        try:
-            skill_level = int(skill_level) if skill_level is not None else None
-        except (TypeError, ValueError):
-            skill_level = None
+            skill_level = as_int(s.get("level"), None)
 
         kd = s.get("kd")
-        if kd is not None:
-            try:
-                kd = round(float(kd), 2)
-            except (TypeError, ValueError):
-                kd = None
+        try:
+            kd = round(float(kd), 2) if kd is not None else None
+        except (TypeError, ValueError):
+            kd = None
 
         adr = s.get("adr")
-        if adr is not None:
-            try:
-                adr = round(float(adr), 1)
-            except (TypeError, ValueError):
-                adr = None
+        try:
+            adr = round(float(adr), 1) if adr is not None else None
+        except (TypeError, ValueError):
+            adr = None
 
         avg_kills = s.get("avg_kills")
         avg_kd_recent = s.get("avg_kd_recent")
         hs = s.get("hs_percent") or s.get("headshot_pct")
-        if hs is not None:
-            try:
-                hs = round(float(hs), 1)
-            except (TypeError, ValueError):
-                hs = None
+        try:
+            hs = round(float(hs), 1) if hs is not None else None
+        except (TypeError, ValueError):
+            hs = None
 
         return {
             "key": meta["key"],
@@ -391,9 +413,9 @@ class ComparePlayersView(APIView):
             "avg_kills": avg_kills,
             "avg_kd_recent": avg_kd_recent,
             "hs_percent": hs,
-            "wins": wins or 0,
-            "losses": losses or 0,
-            "matches": total or s.get("matches") or 0,
+            "wins": wins,
+            "losses": losses,
+            "matches": total,
             "winrate": winrate,
             "avg_kda": avg_kda,
             "main_agent": s.get("main_agent"),
@@ -404,15 +426,8 @@ class ComparePlayersView(APIView):
             "extra": {
                 k: s.get(k)
                 for k in (
-                    "mmr",
-                    "rank_tier",
-                    "hours_played",
-                    "kd",
-                    "headshot_pct",
-                    "faceit_elo",
-                    "skill_level",
-                    "adr",
-                    "avg_kills",
+                    "mmr", "rank_tier", "hours_played", "kd", "headshot_pct",
+                    "faceit_elo", "skill_level", "adr", "avg_kills", "matches",
                 )
                 if s.get(k) is not None
             },

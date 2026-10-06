@@ -1,9 +1,10 @@
 import { ref, watch } from 'vue'
 
 const THEMES = [
-    { id: 'crimson', label: 'Crimson', hint: 'Чёрный / белый / красный' },
+    { id: 'crimson', label: 'Crimson', hint: 'Чёрный / красный' },
+    { id: 'mono', label: 'Mono', hint: 'Жёсткий красный' },
+    { id: 'ivory', label: 'Ivory', hint: 'Чистый ч/б' },
     { id: 'slate', label: 'Slate', hint: 'Холодный' },
-    { id: 'mono', label: 'Mono', hint: 'Жёсткий ч/б' },
 ]
 
 const STORAGE_KEY = 'ge-theme'

@@ -577,6 +577,10 @@ onUnmounted(() => {
   background: #ff2d2d;
   box-shadow: inset 0 0 0 3px #111;
 }
+.theme-dot[data-t='ivory'] {
+  background: #f2f2f2;
+  box-shadow: inset 0 0 0 2px #111;
+}
 
 .notif-wrap {
   position: relative;
