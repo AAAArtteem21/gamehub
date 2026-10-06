@@ -346,7 +346,9 @@ watch(
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  max-width: 960px;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
 }
 .back {
   align-self: flex-start;
@@ -401,6 +403,7 @@ h1 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  width: 100%;
 }
 @media (max-width: 800px) {
   .grid {
