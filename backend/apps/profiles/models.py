@@ -7,6 +7,7 @@ class GameAccount(models.Model):
         ("steam", "Steam"),
         ("faceit", "Faceit"),
         ("opendota", "OpenDota"),
+        ("deadlock", "Deadlock"),
         ("lol", "League of Legends"),
         ("valorant", "Valorant"),
         ("pubg", "PUBG"),

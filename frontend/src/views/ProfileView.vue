@@ -33,6 +33,7 @@ const platformLabels = {
   lol: 'League of Legends',
   valorant: 'Valorant',
   fortnite: 'Fortnite',
+  deadlock: 'Deadlock',
   pubg: 'PUBG',
   roblox: 'Roblox',
   manual: 'Ручной',
@@ -41,7 +42,7 @@ const platformLabels = {
 const statsAccounts = computed(() =>
   accounts.value.filter(
     (a) =>
-      ['opendota', 'faceit', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform) ||
+      ['opendota', 'faceit', 'deadlock', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform) ||
       (a.platform === 'steam' && a.display_stats)
   )
 )
@@ -74,6 +75,34 @@ async function claimReferral() {
     refBusy.value = false
   }
 }
+
+function onAccountCreated(payload) {
+  const newAccount = payload?.account || payload
+  const linked = payload?.linked || []
+
+  if (newAccount?.id) {
+    accounts.value.unshift(newAccount)
+    activeStatsTab.value = newAccount.id
+  }
+  showConnectModal.value = false
+
+  if (linked.length) {
+    const names = linked
+      .map((l) => platformLabels[l.platform] || l.platform)
+      .join(', ')
+    toast.success(`По Steam также подключили: ${names}`)
+    // фоновые синки: подтягиваем список через 4с и через 14с
+    setTimeout(loadAccounts, 4000)
+    setTimeout(loadAccounts, 14000)
+  }
+
+  if (newAccount?.platform !== 'steam' && newAccount?.id) {
+    handleSync(newAccount.id)
+  } else {
+    loadAccounts()
+  }
+}
+
 
 function copyRefCode() {
   const code = progress.value?.referral_code

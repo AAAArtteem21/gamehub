@@ -19,6 +19,13 @@ class FaceitClient:
             "Accept": "application/json",
         })
 
+    def get_player_by_steam_id(self, steam_id_64: str, game: str = "cs2"):
+        """Найти игрока по привязанному SteamID64 (автолинк после Steam-синка)."""
+        return self._get(
+            "/players",
+            params={"game": game, "game_player_id": str(steam_id_64)},
+        )
+
     def _get(self, path, params=None, timeout=15):
         url = f"{self.BASE}{path}"
         r = self.session.get(url, params=params or {}, timeout=timeout)
