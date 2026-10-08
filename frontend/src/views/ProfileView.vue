@@ -190,15 +190,6 @@ async function handleRemove(id) {
   }
 }
 
-function onAccountCreated(newAccount) {
-  accounts.value.unshift(newAccount)
-  showConnectModal.value = false
-  if (newAccount?.id) {
-    activeStatsTab.value = newAccount.id
-    handleSync(newAccount.id)
-  }
-}
-
 function openMatch(matchId) {
   if (!matchId || !activeAccount.value) return
   const p = String(activeAccount.value.platform || '').toLowerCase()
