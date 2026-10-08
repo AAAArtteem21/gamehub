@@ -9,7 +9,12 @@ from .integrations.opendota_client import OpenDotaClient
 from .integrations.faceit_client import FaceitClient
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from django.core.cache import cache
+from django.db import IntegrityError, transaction
 
+
+DEADLOCK_APPID = 1422450
 
 
 def _format_match_time(seconds):
@@ -87,6 +92,7 @@ class ExternalServiceUnavailable(SyncError):
 class ProfileSyncService:
     def __init__(self, game_account: GameAccount):
         self.account = game_account
+        self.linked_accounts = []
 
     def sync(self):
         try:
@@ -106,6 +112,8 @@ class ProfileSyncService:
                 self._sync_roblox()
             elif self.account.platform == "fortnite":
                 self._sync_fortnite()
+            elif self.account.platform == "deadlock":
+                self._sync_deadlock()
         except requests.Timeout:
             raise ExternalServiceUnavailable("Внешний сервис не отвечает, попробуй позже")
         except requests.HTTPError as e:
@@ -116,6 +124,202 @@ class ProfileSyncService:
         self.account.verified = True
         self.account.last_synced_at = timezone.now()
         self.account.save(update_fields=["verified", "last_synced_at"])
+
+    def _spawn_background_sync(self, account: GameAccount):
+        """Фоновый синк одного аккаунта — как _run_sync_in_background во views."""
+        def _run():
+            try:
+                ProfileSyncService(account).sync()
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _auto_link_steam_accounts(self, games):
+        """
+        После _sync_steam: создаём opendota / deadlock / faceit без дублей.
+        Ошибки любой платформы НЕ роняют Steam-синк.
+        Синки новых аккаунтов — в фоне.
+        """
+        user = self.account.user
+        steam_id = self.account.external_id
+        account_id = int(steam_id) & 0xFFFFFFFF  # тот же расчёт, что у OpenDota
+        self.linked_accounts = []
+
+        appids = {g["appid"]: g for g in games}
+
+        def _link(platform, external_id):
+            if GameAccount.objects.filter(user=user, platform=platform).exists():
+                return None
+            try:
+                acc = GameAccount.objects.create(
+                    user=user, platform=platform, external_id=str(external_id)
+                )
+            except IntegrityError:
+                return None
+            self.linked_accounts.append(acc)
+            return acc
+
+        # --- Dota 2 → OpenDota (только если игра есть в библиотеке) ---
+        if 570 in appids:
+            acc = _link("opendota", account_id)
+            if acc:
+                self._spawn_background_sync(acc)
+
+        # --- Deadlock (часы сразу из owned games, стату — в фоне) ---
+        if DEADLOCK_APPID in appids:
+            acc = _link("deadlock", account_id)
+            if acc:
+                hours = round(appids[DEADLOCK_APPID].get("playtime_forever", 0) / 60, 1)
+                acc.extra_stats = {"hours_played": hours, "match_history": []}
+                acc.game_label = "Deadlock"
+                acc.save(update_fields=["extra_stats", "game_label"])
+                self._spawn_background_sync(acc)
+
+        # --- Faceit по SteamID (может отсутствовать — это нормально) ---
+        neg_cache_key = f"faceit_neg_by_steam:{steam_id}"
+        if not cache.get(neg_cache_key):
+            try:
+                from .integrations.faceit_client import FaceitClient
+                player = FaceitClient().get_player_by_steam_id(steam_id)
+                player_id = (player or {}).get("player_id")
+                if player_id:
+                    acc = _link("faceit", player.get("nickname") or player_id)
+                    if acc:
+                        acc.extra_stats = {"player_id": player_id}
+                        acc.save(update_fields=["extra_stats"])
+                        self._spawn_background_sync(acc)
+                else:
+                    cache.set(neg_cache_key, True, timeout=3600)  # не долбим повторно час
+            except Exception:
+                pass  # нет ключа Faceit / 404 / rate limit — Steam-синк не валим
+
+    def _sync_deadlock(self):
+        from .integrations.deadlock_client import DeadlockClient, DeadlockError
+
+        account_id = int(self.account.external_id) & 0xFFFFFFFF
+        client = DeadlockClient()
+
+        # Кэш 10 минут — не бить API на каждый refresh/↻ (IP limits)
+        cache_key = f"deadlock:player:{account_id}"
+        payload = cache.get(cache_key)
+        if payload is None:
+            rank_raw = None
+            try:
+                rank_raw = client.get_rank(account_id)
+            except DeadlockError:
+                pass
+            matches_raw = []
+            try:
+                matches_raw = client.get_match_history(account_id) or []
+            except DeadlockError:
+                pass
+            payload = {"rank": rank_raw, "matches": matches_raw}
+            cache.set(cache_key, payload, timeout=600)
+
+        # --- rank: ответ может быть dict / число / список — парсим защитно ---
+        rank_value = None
+        rank_raw = payload.get("rank")
+        if isinstance(rank_raw, dict):
+            for k in ("rank", "ranked_badge", "badge", "ranked_display_badge"):
+                if isinstance(rank_raw.get(k), (int, float)):
+                    rank_value = int(rank_raw[k])
+                    break
+        elif isinstance(rank_raw, (int, float)):
+            rank_value = int(rank_raw)
+        elif isinstance(rank_raw, list) and rank_raw:
+            first = rank_raw[0]
+            if isinstance(first, dict):
+                for k in ("rank", "ranked_display_badge"):
+                    if isinstance(first.get(k), (int, float)):
+                        rank_value = int(first[k])
+                        break
+            elif isinstance(first, (int, float)):
+                rank_value = int(first)
+        # TODO: сверить реальную форму ответа /v1/players/{id}/rank по одному живому запросу
+
+        # --- hero names: кэш 1 час, один запрос на всех ---
+        hero_names = cache.get("deadlock:hero_names") or {}
+        if not hero_names:
+            try:
+                heroes = client.get_heroes() or []
+                hero_names = {
+                    int(h["id"]): h.get("name") or f"Hero {h['id']}"
+                    for h in heroes if h.get("id") is not None
+                }
+                cache.set("deadlock:hero_names", hero_names, timeout=3600)
+            except Exception:
+                hero_names = {}
+
+        matches = payload.get("matches") or []
+        if isinstance(matches, dict):
+            matches = matches.get("matches") or matches.get("items") or []
+
+        total = len(matches)
+        wins = sum(1 for m in matches if m.get("player_won"))
+        winrate = round(wins / total * 100, 1) if total else 0
+        hero_counter = {}
+        match_history = []
+
+        for m in matches[:20]:
+            hero_id = m.get("hero_id")
+            hero_name = hero_names.get(hero_id, f"Hero {hero_id}") if hero_id else "?"
+            if hero_id:
+                hero_counter[hero_id] = hero_counter.get(hero_id, 0) + 1
+            k = m.get("kills", 0) or 0
+            d = m.get("deaths", 0) or 0
+            a = m.get("assists", 0) or 0
+            won = bool(m.get("player_won"))
+
+            played_at = None
+            ts = m.get("start_time")
+            if ts:
+                try:
+                    played_at = datetime.fromtimestamp(int(ts)).strftime("%d.%m.%Y")
+                except (OSError, ValueError, OverflowError):
+                    pass
+
+            dur = m.get("duration_s")
+            match_history.append({
+                "won": won,
+                "title": hero_name,
+                "subtitle": f"{k}/{d}/{a}",
+                "match_id": m.get("match_id"),
+                "duration": f"{round(dur / 60)} мин" if dur else None,
+                "played_at": played_at,
+                "verdict": None,
+                "details": [
+                    {"label": "CS", "value": (m.get("last_hits") or 0) + (m.get("denies") or 0)},
+                    {"label": "Net worth", "value": m.get("net_worth") or "—"},
+                    {"label": "Уровень", "value": m.get("level") or "—"},
+                ],
+            })
+
+        top_heroes = []
+        for hid, cnt in sorted(hero_counter.items(), key=lambda x: x[1], reverse=True)[:5]:
+            h_wins = sum(1 for m in matches if m.get("hero_id") == hid and m.get("player_won"))
+            top_heroes.append({
+                "name": hero_names.get(hid, f"Hero {hid}"),
+                "games": cnt,
+                "winrate": round(h_wins / cnt * 100, 1) if cnt else 0,
+            })
+
+        existing = self.account.extra_stats or {}
+        existing.update({
+            "matches": total,
+            "wins": wins,
+            "losses": total - wins,
+            "winrate": winrate,
+            "rank": rank_value,
+            "top_heroes": top_heroes,
+            "match_history": match_history,
+            "recent_form": ["W" if m["won"] else "L" for m in match_history[:10]],
+        })
+        # hours_played из Steam (если линковался автоматически) не затираем
+        self.account.extra_stats = existing
+        self.account.game_label = "Deadlock"
+        if rank_value is not None:
+            self.account.skill_rating = rank_value
+        self.account.save(update_fields=["extra_stats", "game_label", "skill_rating"])
 
     def _sync_lol(self):
         from .integrations.riot_client import RiotClient, RiotError
@@ -645,6 +849,7 @@ class ProfileSyncService:
                 }
                 self.account.extra_stats = existing
                 self.account.save(update_fields=["extra_stats"])
+        self._auto_link_steam_accounts(games)
 
     def _sync_opendota(self):
         client = OpenDotaClient()
@@ -1264,6 +1469,42 @@ def build_display_stats(platform, extra_stats):
             "tags": [],
             "list": [],
             "match_history": [],
+        }
+    
+    if platform == "deadlock":
+        matches = extra_stats.get("matches") or 0
+        wins = extra_stats.get("wins") or 0
+        wr = extra_stats.get("winrate")
+        rank = extra_stats.get("rank")
+        hours = extra_stats.get("hours_played")
+        top_heroes = extra_stats.get("top_heroes") or []
+        form = extra_stats.get("recent_form") or []
+
+        metrics = [
+            {"label": "матчей", "value": matches},
+            {"label": "побед", "value": wins, "tone": "win"},
+            {"label": "винрейт", "value": f"{wr}%", "tone": "accent"} if wr is not None else {"label": "винрейт", "value": "—"},
+        ]
+        if hours is not None:
+            metrics.append({"label": "часов", "value": hours})
+
+        tags = []
+        if rank is not None:
+            tags.append({"label": f"Rank {rank}", "tone": "accent"})
+        if form:
+            tags.append({"label": "Форма " + "".join(form[:8])})
+
+        return {
+            "game_label": "Deadlock",
+            "metrics": metrics[:6],
+            "badge": f"Rank {rank}" if rank is not None else "Deadlock",
+            "tags": tags,
+            "list_title": "Любимые герои" if top_heroes else "",
+            "list": [
+                {"name": h["name"], "sub": f"{h['games']} игр", "value": f"{h['winrate']}%", "good": h["winrate"] >= 50}
+                for h in top_heroes
+            ],
+            "match_history": extra_stats.get("match_history", []),
         }
     
     if platform == "faceit":

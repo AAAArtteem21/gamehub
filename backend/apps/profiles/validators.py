@@ -25,3 +25,6 @@ def validate_external_id(platform, external_id):
     elif platform == "roblox":
         if len(external_id) < 3:
             raise ValidationError("Укажи корректный никнейм Roblox")
+    elif platform == 'deadlock':
+        if not external_id.strip().isdigit():
+            raise ValidationError('Deadlock: укажи SteamID64 или account ID (число)')

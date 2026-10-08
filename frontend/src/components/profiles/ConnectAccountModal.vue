@@ -18,6 +18,7 @@ const platforms = [
   { value: 'pubg', label: 'PUBG', hint: 'Ник в PUBG (Steam)' },
   { value: 'roblox', label: 'Roblox', hint: 'Никнейм Roblox' },
   { value: 'fortnite', label: 'Fortnite', hint: 'Никнейм Epic Games' },
+  { value: 'deadlock', label: 'Deadlock', hint: 'SteamID64 или account ID (число)' },
 ]
 async function submit() {
   submitting.value = true
