@@ -203,6 +203,10 @@ function openMatch(matchId) {
     openMatchGame.value = 'faceit'
     openMatchId.value = matchId
   }
+  else if (p === 'deadlock') {
+    openMatchGame.value = 'deadlock'
+    openMatchId.value = matchId
+  }
 }
 
 function closeMatch() {

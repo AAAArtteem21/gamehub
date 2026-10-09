@@ -56,18 +56,40 @@ class GameAccountViewSet(viewsets.ModelViewSet):
 
         return response
         
-    def create(self,request,*args,**kwargs):
-        platform = request.data.get('platform')
+    def create(self, request, *args, **kwargs):
+        platform = request.data.get("platform")
         existing_count = GameAccount.objects.filter(
-            user=request.user,platform=platform
+            user=request.user, platform=platform
         ).count()
         if existing_count >= MAX_ACCOUNTS_PER_PLATFORM:
-            return Response (
-                {'detail': f'Уже подключен аккаунт для платформы{platform}'},
-                status=status.HTTP_400_BAD_REQUEST
+            return Response(
+                {"detail": f"Уже подключен аккаунт для платформы {platform}"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        response = super().create(request,*args,**kwargs)
+
+        response = super().create(request, *args, **kwargs)
+        service = None
+
+        if platform == "steam":
+            try:
+                account = GameAccount.objects.get(id=response.data["id"])
+                service = ProfileSyncService(account)
+                service.sync()
+                response.data["account"] = self.get_serializer(account).data
+            except SyncError as e:
+                response.data["sync_error"] = str(e)
+            except Exception:
+                pass
+            response.data["linked"] = [
+                {
+                    "platform": a.platform,
+                    "id": a.id,
+                    "status": "syncing",
+                    "nickname": a.nickname,
+                }
+                for a in (service.linked_accounts if service else [])
+            ]
+
         cache.delete(_list_cache_key(request.user.id))
         return response
     
@@ -457,10 +479,199 @@ class GuestProfileView(APIView):
             return self._valorant_guest(external_id)
         if game == "faceit":
             return self._faceit_guest(external_id)
+        if game == "deadlock":
+            return self._deadlock_guest(external_id)
         return Response(
-            {"detail": "Гостевой просмотр поддерживается для dota2 и valorant"},
+            {"detail": "Гостевой просмотр: dota2, valorant, faceit, deadlock"},
             status=400,
         )
+
+    def _deadlock_guest(self, external_id):
+        from .integrations.deadlock_client import DeadlockClient, DeadlockError
+        from .serivces import build_display_stats, ProfileSyncService
+        from .models import GameAccount
+
+        raw = (external_id or "").strip()
+        if not raw.isdigit():
+            return Response({"detail": "Deadlock: account_id (число)"}, status=400)
+
+        account_id = int(raw) & 0xFFFFFFFF
+
+        # reuse sync logic via temporary fake account object is heavy —
+        # call client + same parsing by instantiating service on ephemeral data
+        client = DeadlockClient()
+        try:
+            matches = client.get_match_history(account_id) or []
+        except DeadlockError as e:
+            return Response({"detail": str(e)}, status=404)
+        except Exception:
+            return Response({"detail": "Не удалось загрузить Deadlock"}, status=502)
+
+        if isinstance(matches, dict):
+            matches = matches.get("matches") or []
+
+        # lightweight: build GameAccount-like extra via ProfileSyncService pattern
+        # create ephemeral dict by running sync helpers
+        from django.core.cache import cache
+        from datetime import datetime
+        from collections import Counter
+
+        rank_raw = None
+        try:
+            rank_raw = client.get_rank(account_id)
+        except Exception:
+            pass
+        hero_stats_raw = None
+        try:
+            hero_stats_raw = client.get_hero_stats(account_id)
+        except Exception:
+            pass
+
+        hero_names = cache.get("deadlock:hero_names") or {}
+        if not hero_names:
+            try:
+                heroes = client.get_heroes() or []
+                hero_names = {
+                    int(h["id"]): (h.get("name") or f"Hero {h['id']}")
+                    for h in heroes if isinstance(h, dict) and h.get("id") is not None
+                }
+                cache.set("deadlock:hero_names", hero_names, timeout=86400)
+            except Exception:
+                hero_names = {}
+
+        def _won(m):
+            if m.get("player_won") is not None:
+                return bool(m.get("player_won"))
+            pt, mr = m.get("player_team"), m.get("match_result")
+            if pt is not None and mr is not None:
+                try:
+                    return int(pt) == int(mr)
+                except (TypeError, ValueError):
+                    return False
+            return False
+
+        def _kda(m):
+            k = m.get("player_kills", m.get("kills", 0)) or 0
+            d = m.get("player_deaths", m.get("deaths", 0)) or 0
+            a = m.get("player_assists", m.get("assists", 0)) or 0
+            return int(k), int(d), int(a)
+
+        rank_value = None
+        if isinstance(rank_raw, dict):
+            for k in ("ranked_display_badge", "rank", "badge", "ranked_badge_level"):
+                if isinstance(rank_raw.get(k), (int, float)):
+                    rank_value = int(rank_raw[k])
+                    break
+        elif isinstance(rank_raw, (int, float)):
+            rank_value = int(rank_raw)
+
+        total = len(matches)
+        wins = sum(1 for m in matches if _won(m))
+        losses = total - wins
+        k_sum = d_sum = a_sum = n = 0
+        history = []
+        hero_counter = Counter()
+
+        for m in matches[:40]:
+            hid = m.get("hero_id")
+            try:
+                hid = int(hid) if hid is not None else None
+            except (TypeError, ValueError):
+                hid = None
+            name = hero_names.get(hid, f"Hero {hid}") if hid else "?"
+            if hid:
+                hero_counter[hid] += 1
+            k, d, a = _kda(m)
+            k_sum += k
+            d_sum += d
+            a_sum += a
+            n += 1
+            dur = m.get("match_duration_s", m.get("duration_s"))
+            played_at = None
+            if m.get("start_time"):
+                try:
+                    played_at = datetime.fromtimestamp(int(m["start_time"])).strftime("%d.%m.%Y")
+                except Exception:
+                    pass
+            history.append({
+                "won": _won(m),
+                "title": name,
+                "subtitle": f"{k}/{d}/{a}",
+                "match_id": m.get("match_id"),
+                "duration": f"{round(int(dur)/60)} мин" if dur else None,
+                "played_at": played_at,
+                "details": [
+                    {"label": "LH/Denies", "value": f"{m.get('last_hits') or 0}/{m.get('denies') or 0}"},
+                    {"label": "Net worth", "value": m.get("net_worth") or "—"},
+                    {"label": "Уровень", "value": m.get("hero_level") or "—"},
+                ],
+            })
+
+        top_heroes = []
+        for hid, cnt in hero_counter.most_common(8):
+            hw = sum(1 for m in matches if m.get("hero_id") == hid and _won(m))
+            top_heroes.append({
+                "name": hero_names.get(hid, f"Hero {hid}"),
+                "games": cnt,
+                "winrate": round(hw / cnt * 100, 1) if cnt else 0,
+            })
+
+        extra = {
+            "matches": total,
+            "wins": wins,
+            "losses": losses,
+            "winrate": round(wins / total * 100, 1) if total else 0,
+            "rank": rank_value,
+            "avg_kills": round(k_sum / n, 1) if n else None,
+            "avg_deaths": round(d_sum / n, 1) if n else None,
+            "avg_assists": round(a_sum / n, 1) if n else None,
+            "sample_size": n,
+            "top_heroes": top_heroes,
+            "match_history": history,
+            "recent_form": ["W" if m["won"] else "L" for m in history[:12]],
+        }
+        if n:
+            extra["avg_kda"] = (
+                f"{extra['avg_kills']}/{extra['avg_deaths']}/{extra['avg_assists']} "
+                f"({round((k_sum+a_sum)/max(d_sum,1), 2)})"
+            )
+
+        gh = GameAccount.objects.filter(
+            platform="deadlock", external_id=str(account_id)
+        ).select_related("user").first()
+        if not gh:
+            # also match steam32 from full steam id stored as external
+            gh = GameAccount.objects.filter(
+                platform="deadlock", external_id=str(int(raw) & 0xFFFFFFFF)
+            ).select_related("user").first()
+
+        # cross-games same account_id
+        related = []
+        related.append({
+            "game": "dota2",
+            "label": "Dota 2",
+            "path": f"/players/guest/dota2/{account_id}",
+        })
+        related.append({
+            "game": "deadlock",
+            "label": "Deadlock",
+            "path": f"/players/guest/deadlock/{account_id}",
+        })
+
+        return Response({
+            "is_public": True,
+            "display_name": f"Deadlock #{account_id}",
+            "avatar_url": None,
+            "is_gamehub_user": bool(gh),
+            "gamehub_user_id": gh.user_id if gh else None,
+            "wins": wins,
+            "losses": losses,
+            "rank": rank_value,
+            "match_history": history,
+            "top_heroes": top_heroes,
+            "display_stats": build_display_stats("deadlock", extra),
+            "related_games": related,
+        })
 
     def _faceit_guest(self, external_id):
         from .integrations.faceit_client import FaceitClient, FaceitError

@@ -12,11 +12,6 @@ class DeadlockRateLimited(DeadlockError):
 
 
 class DeadlockClient:
-    """
-    api.deadlock-api.com. Ключ ОПЦИОНАЛЕН (DEADLOCK_API_KEY в .env):
-    без ключа работаем в IP-лимитах (~20 req/min на rank-бакет).
-    Retry только на 429 с backoff. 404 = игрок не найден (не роняем синк).
-    """
     BASE_URL = "https://api.deadlock-api.com"
     MAX_RETRIES = 2
 
@@ -27,39 +22,52 @@ class DeadlockClient:
         if self.api_key:
             self.session.headers.update({"X-API-Key": self.api_key})
 
-    def _get(self, path, params=None, timeout=12):
+    def _get(self, path, params=None, timeout=15):
         url = f"{self.BASE_URL}{path}"
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 r = self.session.get(url, params=params or {}, timeout=timeout)
             except requests.Timeout:
-                raise DeadlockError("Deadlock API не отвечает, попробуй позже")
+                raise DeadlockError("Deadlock API не отвечает")
             except requests.RequestException as e:
-                raise DeadlockError(f"Deadlock API: сетевая ошибка ({e})")
+                raise DeadlockError(f"Deadlock API: {e}")
 
             if r.status_code == 429:
                 if attempt < self.MAX_RETRIES:
-                    time.sleep(2 * (attempt + 1))  # backoff: 2s, 4s
+                    time.sleep(2 * (attempt + 1))
                     continue
-                raise DeadlockRateLimited("Deadlock API: лимит запросов (IP)")
+                raise DeadlockRateLimited("Deadlock API: лимит (IP)")
             if r.status_code == 404:
-                raise DeadlockError("Игрок не найден в Deadlock")
+                raise DeadlockError("Не найдено")
             if r.status_code >= 500:
-                raise DeadlockError("Deadlock API временно недоступен")
+                raise DeadlockError("Deadlock API недоступен")
             r.raise_for_status()
             return r.json()
-        raise DeadlockError("Deadlock API: неизвестная ошибка")
+        raise DeadlockError("Deadlock API: ошибка")
 
-    # --- Players ---
     def get_rank(self, account_id):
         return self._get(f"/v1/players/{account_id}/rank")
 
-    def get_match_history(self, account_id):
-        return self._get(f"/v1/players/{account_id}/match-history")
+    def get_match_history(self, account_id, only_stored=False):
+        params = {}
+        if only_stored:
+            params["only_stored_history"] = "true"
+        return self._get(f"/v1/players/{account_id}/match-history", params=params)
 
-    def get_card(self, account_id):
-        return self._get(f"/v1/players/{account_id}/card")
+    def get_hero_stats(self, account_id):
+        return self._get(f"/v1/players/{account_id}/hero-stats")
 
-    # --- Assets ---
+    def get_account_stats(self, account_id):
+        return self._get(f"/v1/players/{account_id}/account-stats")
+
+    def get_mate_stats(self, account_id):
+        return self._get(f"/v1/players/{account_id}/mate-stats")
+
+    def get_match_metadata(self, match_id):
+        return self._get(f"/v1/matches/{match_id}/metadata")
+
     def get_heroes(self):
         return self._get("/v1/assets/heroes")
+
+    def get_ranks(self):
+        return self._get("/v1/assets/ranks")
