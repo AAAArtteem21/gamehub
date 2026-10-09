@@ -1145,6 +1145,8 @@ class MatchParticipantsView(APIView):
             return self._faceit_participants(match_id)
         if game in ("faceit", "cs2"):
             return self._faceit_participants(match_id)
+        if game == "deadlock":
+            return self._deadlock_participants(match_id)
         return Response({"detail": "Игра не поддерживается"}, status=400)
 
     def _dota_participants(self, match_id):
@@ -1248,6 +1250,131 @@ class MatchParticipantsView(APIView):
             "radiant_win": detail.get("radiant_win"),
             "duration": detail.get("duration"),
         })
+
+    def _deadlock_participants(self, match_id):
+        import requests
+        from django.conf import settings
+        from django.core.cache import cache
+        from .models import GameAccount
+
+        base = "https://api.deadlock-api.com"
+        headers = {"Accept": "application/json"}
+        key = getattr(settings, "DEADLOCK_API_KEY", "") or ""
+        if key:
+            headers["X-API-Key"] = key
+
+        try:
+            r = requests.get(
+                f"{base}/v1/matches/{match_id}/metadata",
+                headers=headers,
+                timeout=20,
+            )
+            if r.status_code != 200:
+                return Response(
+                    {"detail": f"Матч не найден ({r.status_code})"},
+                    status=404,
+                )
+            detail = r.json()
+        except Exception:
+            return Response({"detail": "Матч Deadlock не найден"}, status=404)
+
+        if not isinstance(detail, dict):
+            return Response({"detail": "Матч Deadlock не найден"}, status=404)
+
+        match_info = detail.get("match_info") or {}
+        if not isinstance(match_info, dict):
+            match_info = {}
+
+        players = match_info.get("players") or detail.get("players") or []
+        if not isinstance(players, list):
+            players = []
+
+        duration = match_info.get("duration_s") or detail.get("duration_s")
+        winning_team = match_info.get("winning_team")
+        if winning_team is None:
+            winning_team = match_info.get("match_outcome")
+
+        # имена героев
+        hero_names = cache.get("deadlock:hero_names") or {}
+        if not hero_names:
+            try:
+                from .integrations.deadlock_client import DeadlockClient
+                heroes = DeadlockClient().get_heroes() or []
+                if isinstance(heroes, list):
+                    hero_names = {
+                        str(h.get("id") or h.get("hero_id")): (
+                            h.get("name") or h.get("class_name") or str(h.get("id"))
+                        )
+                        for h in heroes
+                        if isinstance(h, dict)
+                    }
+                    cache.set("deadlock:hero_names", hero_names, 3600)
+            except Exception:
+                hero_names = {}
+
+        participants = []
+        for p in players:
+            if not isinstance(p, dict):
+                continue
+
+            account_id = p.get("account_id")
+            if account_id is not None:
+                try:
+                    account_id = str(int(account_id) & 0xFFFFFFFF)
+                except (TypeError, ValueError):
+                    account_id = str(account_id)
+
+            hid = p.get("hero_id")
+            hero = hero_names.get(
+                str(hid), f"Hero {hid}" if hid is not None else "?"
+            )
+
+            kills = p.get("player_kills", p.get("kills", 0)) or 0
+            deaths = p.get("player_deaths", p.get("deaths", 0)) or 0
+            assists = p.get("player_assists", p.get("assists", 0)) or 0
+
+            team = p.get("player_team", p.get("team"))
+            try:
+                team = int(team) if team is not None else None
+            except (TypeError, ValueError):
+                team = None
+
+            gh = None
+            if account_id:
+                gh = (
+                    GameAccount.objects.filter(
+                        platform="deadlock",
+                        external_id=str(account_id),
+                    )
+                    .select_related("user")
+                    .first()
+                )
+
+            participants.append({
+                "account_id": account_id,
+                "display_name": (
+                    (gh.nickname if gh else None)
+                    or p.get("name")
+                    or (f"Player {account_id}" if account_id else "?")
+                ),
+                "hero": hero,
+                "level": p.get("hero_level") or p.get("level"),
+                "kda": f"{kills}/{deaths}/{assists}",
+                "net_worth": p.get("net_worth"),
+                "team": team,
+                "is_team0": team == 0,
+                "is_gamehub_user": bool(gh),
+                "gamehub_user_id": gh.user_id if gh else None,
+            })
+
+        return Response({
+            "participants": participants,
+            "duration": duration,
+            "winning_team": winning_team,
+            "map": "Deadlock",
+        })
+
+
     def _faceit_participants(self, match_id):
         from .integrations.faceit_client import FaceitClient, FaceitError
         from .models import GameAccount
