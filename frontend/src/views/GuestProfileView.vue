@@ -125,6 +125,25 @@ function goCompare() {
   })
 }
 
+const isProfileEmpty = computed(() => {
+  if (!profile.value) return false
+  if (profile.value.is_empty) return true
+  if (profile.value.detail_hint) return true
+  const w = profile.value.wins || 0
+  const l = profile.value.losses || 0
+  const hist = profile.value.match_history || []
+  const ds = profile.value.display_stats
+  const dsMatches = ds?.metrics?.length
+  // 0/0 и нет истории и нет нормальной карточки
+  if (w === 0 && l === 0 && !hist.length) {
+    // deadlock с rank тоже может быть «пустым» по WL — не считаем empty если есть history в display_stats
+    if (ds?.match_history?.length) return false
+    if (game.value === 'deadlock' && (ds || profile.value.tier)) return false
+    return true
+  }
+  return false
+})
+
 function showMoreHistory() {
   historyLimit.value = Math.min(
     historyLimit.value + 10,
@@ -170,6 +189,7 @@ watch(() => [route.params.game, route.params.externalId], () => load())
           <h1 v-else class="anon-name">Скрытый профиль</h1>
           <span class="external-badge">{{ sourceLabel }}</span>
           <div class="header-actions">
+            <button type="button" class="btn-secondary" @click="router.back()">← Назад</button>
             <button type="button" class="btn-secondary" @click="toggleFav">
               {{ isFav ? '★ В избранном' : '☆ В избранное' }}
             </button>
@@ -198,8 +218,15 @@ watch(() => [route.params.game, route.params.externalId], () => load())
         >{{ g.label }}</router-link>
       </div>
 
-      <!-- Как у себя: полная карточка Faceit / Dota / Valorant -->
-      <div class="card stats-card" v-if="hasDisplayStats">
+      <div
+        v-if="isProfileEmpty"
+        class="card empty-hint-card"
+      >
+        Статистика недоступна: профиль скрыт в Steam/OpenDota, нет публичных матчей
+        или игрок не найден. Это не ошибка сайта.
+      </div>
+
+      <div class="card stats-card" v-else-if="hasDisplayStats">
         <UniversalStatsCard
           :stats="profile.display_stats"
           :platform="platform"
@@ -521,8 +548,14 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-right: 4px;
+}
+.empty-hint-card {
+  padding: 20px 18px !important;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+  border: 1px dashed var(--border-color);
 }
 
 .state-message {

@@ -1294,21 +1294,40 @@ class MatchParticipantsView(APIView):
         if winning_team is None:
             winning_team = match_info.get("match_outcome")
 
-        # имена героев
+        # --- имена героев (ключи только str) ---
         hero_names = cache.get("deadlock:hero_names") or {}
+        # нормализуем старый кэш с int-ключами
+        if hero_names and any(not isinstance(k, str) for k in hero_names.keys()):
+            hero_names = {str(k): v for k, v in hero_names.items()}
+            cache.set("deadlock:hero_names", hero_names, 3600)
+
         if not hero_names:
             try:
                 from .integrations.deadlock_client import DeadlockClient
                 heroes = DeadlockClient().get_heroes() or []
+                if isinstance(heroes, dict):
+                    heroes = heroes.get("heroes") or heroes.get("data") or []
                 if isinstance(heroes, list):
-                    hero_names = {
-                        str(h.get("id") or h.get("hero_id")): (
-                            h.get("name") or h.get("class_name") or str(h.get("id"))
+                    hero_names = {}
+                    for h in heroes:
+                        if not isinstance(h, dict):
+                            continue
+                        hid = h.get("id")
+                        if hid is None:
+                            hid = h.get("hero_id")
+                        if hid is None:
+                            continue
+                        name = (
+                            h.get("name")
+                            or h.get("display_name")
+                            or h.get("class_name")
+                            or h.get("localized_name")
                         )
-                        for h in heroes
-                        if isinstance(h, dict)
-                    }
-                    cache.set("deadlock:hero_names", hero_names, 3600)
+                        if name:
+                            name = str(name).replace("hero_", "").replace("_", " ").title()
+                            hero_names[str(hid)] = name
+                    if hero_names:
+                        cache.set("deadlock:hero_names", hero_names, 3600)
             except Exception:
                 hero_names = {}
 
@@ -1325,9 +1344,7 @@ class MatchParticipantsView(APIView):
                     account_id = str(account_id)
 
             hid = p.get("hero_id")
-            hero = hero_names.get(
-                str(hid), f"Hero {hid}" if hid is not None else "?"
-            )
+            hero = hero_names.get(str(hid), f"Hero {hid}" if hid is not None else "?")
 
             kills = p.get("player_kills", p.get("kills", 0)) or 0
             deaths = p.get("player_deaths", p.get("deaths", 0)) or 0
@@ -1357,6 +1374,7 @@ class MatchParticipantsView(APIView):
                     or p.get("name")
                     or (f"Player {account_id}" if account_id else "?")
                 ),
+                "avatar": None,
                 "hero": hero,
                 "level": p.get("hero_level") or p.get("level"),
                 "kda": f"{kills}/{deaths}/{assists}",
@@ -1366,6 +1384,46 @@ class MatchParticipantsView(APIView):
                 "is_gamehub_user": bool(gh),
                 "gamehub_user_id": gh.user_id if gh else None,
             })
+
+        # --- Steam ники + аватарки ---
+        steam_ids = []
+        for p in participants:
+            aid = p.get("account_id")
+            if not aid:
+                continue
+            try:
+                steam_ids.append(str(int(aid) + 76561197960265728))
+            except (TypeError, ValueError):
+                pass
+
+        personas = {}
+        if steam_ids:
+            try:
+                from .integrations.steam_client import SteamClient
+                sc = SteamClient()
+                for i in range(0, len(steam_ids), 100):
+                    chunk = steam_ids[i:i + 100]
+                    for row in (sc.get_player_summaries(chunk) or []):
+                        sid = str(row.get("steamid") or "")
+                        if sid:
+                            personas[sid] = row
+            except Exception:
+                personas = {}
+
+        for p in participants:
+            aid = p.get("account_id")
+            if not aid:
+                continue
+            try:
+                sid64 = str(int(aid) + 76561197960265728)
+            except (TypeError, ValueError):
+                continue
+            row = personas.get(sid64) or {}
+            if row.get("personaname"):
+                p["display_name"] = row["personaname"]
+            av = row.get("avatarfull") or row.get("avatarmedium") or row.get("avatar")
+            if av:
+                p["avatar"] = av
 
         return Response({
             "participants": participants,
