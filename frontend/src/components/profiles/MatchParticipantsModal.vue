@@ -25,6 +25,7 @@ const resolvedGame = computed(() => {
 
 const isValorant = computed(() => resolvedGame.value === 'valorant')
 const isFaceit = computed(() => resolvedGame.value === 'faceit')
+const isDeadlock = computed(() => resolvedGame.value === 'deadlock')
 
 const faceitTeam1 = computed(() =>
   participants.value.filter((p) => p.team === 'faction1')
@@ -41,12 +42,20 @@ const blueTeam = computed(() =>
 const radiantPlayers = computed(() => participants.value.filter((p) => p.is_radiant))
 const direPlayers = computed(() => participants.value.filter((p) => !p.is_radiant))
 
+const deadlockTeam0 = computed(() =>
+  participants.value.filter((p) => p.team === 0 || p.is_team0 === true)
+)
+const deadlockTeam1 = computed(() =>
+  participants.value.filter((p) => p.team === 1 || p.is_team0 === false)
+)
+
 function canOpenProfile(p) {
   if (!p) return false
   if (p.is_gamehub_user && p.gamehub_user_id) return true
   if (p.account_id) return true
   if (p.riot_id) return true
   if (resolvedGame.value === 'faceit' && (p.nickname || p.display_name || p.player_id)) return true
+  if (resolvedGame.value === 'deadlock' && p.account_id) return true
   return false
 }
 
@@ -72,6 +81,7 @@ async function load() {
       faction2_score: res.data.faction2_score,
       winner: res.data.winner,
       competition: res.data.competition,
+      winning_team: res.data.winning_team,
     }
     activeRound.value = 0
   } catch (e) {
@@ -92,16 +102,17 @@ function goToPlayer(p) {
     router.push(`/players/guest/dota2/${p.account_id}`)
     return
   }
+  if (resolvedGame.value === 'deadlock' && p.account_id) {
+    router.push(`/players/guest/deadlock/${p.account_id}`)
+    return
+  }
   if (resolvedGame.value === 'valorant' && p.riot_id) {
     router.push(`/players/guest/valorant/${encodeURIComponent(p.riot_id)}`)
     return
   }
-  // Faceit: ник или player_id
   if (resolvedGame.value === 'faceit') {
     const id = p.nickname || p.display_name || p.player_id
-    if (id) {
-      router.push(`/players/guest/faceit/${encodeURIComponent(id)}`)
-    }
+    if (id) router.push(`/players/guest/faceit/${encodeURIComponent(id)}`)
   }
 }
 
@@ -127,21 +138,19 @@ onMounted(load)
   <div class="overlay" @click.self="emit('close')">
     <div
       class="modal card fade-in-up"
-      :class="{ 'valorant-modal': isValorant || isFaceit }"
+      :class="{ 'valorant-modal': isValorant || isFaceit || isDeadlock }"
     >
       <div class="modal-header">
         <div>
           <h3>Участники матча</h3>
 
-          <!-- DOTA meta -->
-          <span class="match-meta" v-if="!isValorant && !isFaceit && duration">
+          <span class="match-meta" v-if="!isValorant && !isFaceit && !isDeadlock && duration">
             {{ fmtDuration(duration) }} ·
             <span :class="radiantWin ? 'radiant-text' : 'dire-text'">
               {{ radiantWin ? 'Победа Radiant' : 'Победа Dire' }}
             </span>
           </span>
 
-          <!-- VALORANT meta -->
           <span class="match-meta valorant-meta" v-if="isValorant">
             <span class="v-map">{{ matchData.map || 'Карта' }}</span>
             <span class="v-score-line">
@@ -153,7 +162,6 @@ onMounted(load)
             <span class="v-winner-tag" v-else-if="matchData.blue_won">Победа Blue</span>
           </span>
 
-          <!-- FACEIT meta -->
           <span class="match-meta valorant-meta" v-if="isFaceit">
             <span class="v-map">Faceit · {{ matchData.map || 'Карта' }}</span>
             <span class="v-score-line">
@@ -162,6 +170,14 @@ onMounted(load)
               <span class="v-score blue">{{ matchData.faction2_score ?? '—' }}</span>
             </span>
             <span class="v-winner-tag" v-if="matchData.competition">{{ matchData.competition }}</span>
+          </span>
+
+          <span class="match-meta valorant-meta" v-if="isDeadlock">
+            <span class="v-map">Deadlock</span>
+            <span v-if="duration">{{ fmtDuration(duration) }}</span>
+            <span class="v-winner-tag" v-if="matchData.winning_team != null">
+              Team {{ matchData.winning_team }} win
+            </span>
           </span>
         </div>
         <button class="close-btn" type="button" @click="emit('close')">✕</button>
@@ -172,12 +188,10 @@ onMounted(load)
 
       <!-- VALORANT -->
       <template v-else-if="isValorant">
+        <!-- ... без изменений: redTeam / blueTeam / rounds ... -->
         <div class="v-teams">
           <div class="v-team red-side">
-            <div class="v-team-header">
-              <span>Red</span>
-              <span>{{ matchData.red_score ?? 0 }}</span>
-            </div>
+            <div class="v-team-header"><span>Red</span><span>{{ matchData.red_score ?? 0 }}</span></div>
             <div
               v-for="p in redTeam"
               :key="p.riot_id || p.display_name"
@@ -197,12 +211,8 @@ onMounted(load)
               </div>
             </div>
           </div>
-
           <div class="v-team blue-side">
-            <div class="v-team-header">
-              <span>Blue</span>
-              <span>{{ matchData.blue_score ?? 0 }}</span>
-            </div>
+            <div class="v-team-header"><span>Blue</span><span>{{ matchData.blue_score ?? 0 }}</span></div>
             <div
               v-for="p in blueTeam"
               :key="p.riot_id || p.display_name"
@@ -223,7 +233,6 @@ onMounted(load)
             </div>
           </div>
         </div>
-
         <div class="rounds-section" v-if="matchData.rounds?.length">
           <div class="rounds-title">По раундам</div>
           <div class="round-tabs">
@@ -301,15 +310,9 @@ onMounted(load)
                   <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
                 </div>
                 <div class="v-player-kda">{{ p.kda }}</div>
-                <div class="v-player-agent" v-if="p.mvps != null || p.headshots != null">
-                  <template v-if="p.mvps">MVP ×{{ p.mvps }}</template>
-                  <template v-if="p.mvps && p.headshots != null"> · </template>
-                  <template v-if="p.headshots != null">HS {{ p.headshots }}</template>
-                </div>
               </div>
             </div>
           </div>
-
           <div class="v-team blue-side">
             <div class="v-team-header">
               <span>{{ matchData.faction2_name || 'Team 2' }}</span>
@@ -332,19 +335,79 @@ onMounted(load)
                   <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
                 </div>
                 <div class="v-player-kda">{{ p.kda }}</div>
-                <div class="v-player-agent" v-if="p.mvps != null || p.headshots != null">
-                  <template v-if="p.mvps">MVP ×{{ p.mvps }}</template>
-                  <template v-if="p.mvps && p.headshots != null"> · </template>
-                  <template v-if="p.headshots != null">HS {{ p.headshots }}</template>
-                </div>
               </div>
             </div>
           </div>
         </div>
       </template>
 
+      <!-- DEADLOCK -->
+      <template v-else-if="isDeadlock">
+        <div class="v-teams">
+          <div class="v-team red-side">
+            <div class="v-team-header"><span>Team 0</span></div>
+            <div
+              v-for="p in deadlockTeam0"
+              :key="'t0-' + (p.account_id || p.display_name)"
+              class="v-player-card"
+              :class="{ clickable: canOpenProfile(p) }"
+              @click="goToPlayer(p)"
+            >
+              <div class="v-player-avatar placeholder">
+                {{ (p.display_name || '?')[0]?.toUpperCase() }}
+              </div>
+              <div class="v-player-info">
+                <div class="v-player-top">
+                  <span class="v-player-name">{{ p.display_name }}</span>
+                  <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
+                </div>
+                <div class="v-player-agent">
+                  {{ p.hero }}
+                  <template v-if="p.level != null"> · ур. {{ p.level }}</template>
+                </div>
+                <div class="v-player-kda">
+                  {{ p.kda }}
+                  <template v-if="p.net_worth != null"> · NW {{ p.net_worth }}</template>
+                </div>
+              </div>
+            </div>
+            <div v-if="!deadlockTeam0.length" class="state" style="padding: 16px 0">Нет игроков</div>
+          </div>
+          <div class="v-team blue-side">
+            <div class="v-team-header"><span>Team 1</span></div>
+            <div
+              v-for="p in deadlockTeam1"
+              :key="'t1-' + (p.account_id || p.display_name)"
+              class="v-player-card"
+              :class="{ clickable: canOpenProfile(p) }"
+              @click="goToPlayer(p)"
+            >
+              <div class="v-player-avatar placeholder">
+                {{ (p.display_name || '?')[0]?.toUpperCase() }}
+              </div>
+              <div class="v-player-info">
+                <div class="v-player-top">
+                  <span class="v-player-name">{{ p.display_name }}</span>
+                  <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
+                </div>
+                <div class="v-player-agent">
+                  {{ p.hero }}
+                  <template v-if="p.level != null"> · ур. {{ p.level }}</template>
+                </div>
+                <div class="v-player-kda">
+                  {{ p.kda }}
+                  <template v-if="p.net_worth != null"> · NW {{ p.net_worth }}</template>
+                </div>
+              </div>
+            </div>
+            <div v-if="!deadlockTeam1.length" class="state" style="padding: 16px 0">Нет игроков</div>
+          </div>
+        </div>
+      </template>
+
       <!-- DOTA -->
       <div v-else class="dota-layout">
+        <!-- оставь свой dota-блок как был — radiantPlayers / direPlayers -->
         <div class="dota-team">
           <div class="dota-team-header radiant">Radiant</div>
           <div
@@ -371,7 +434,6 @@ onMounted(load)
                 </div>
               </div>
             </div>
-
             <div class="dota-stats">
               <div class="dst"><span>GPM</span><b>{{ p.gpm ?? '—' }}</b></div>
               <div class="dst"><span>XPM</span><b>{{ p.xpm ?? '—' }}</b></div>
@@ -382,40 +444,25 @@ onMounted(load)
               <div class="dst"><span>Heal</span><b>{{ p.hero_healing ?? '—' }}</b></div>
               <div class="dst"><span>Denies</span><b>{{ p.denies ?? '—' }}</b></div>
             </div>
-
             <div class="dota-items-row">
               <div class="dota-items">
-                <div
-                  class="dota-item"
-                  v-for="(item, idx) in (p.items || [])"
-                  :key="'it-' + idx"
-                  :title="item.name"
-                >
+                <div class="dota-item" v-for="(item, idx) in (p.items || [])" :key="'it-' + idx" :title="item.name">
                   <img v-if="item.icon_url" :src="item.icon_url" :alt="item.name || ''" />
                   <span v-else class="dota-item-fallback">{{ item.name?.slice(0, 2) }}</span>
                 </div>
               </div>
               <div class="dota-extra-items">
-                <div
-                  v-if="p.neutral_item"
-                  class="dota-item neutral"
-                  :title="p.neutral_item.name || 'Neutral'"
-                >
-                  <img
-                    v-if="p.neutral_item.icon_url"
-                    :src="p.neutral_item.icon_url"
-                    :alt="p.neutral_item.name || ''"
-                  />
+                <div v-if="p.neutral_item" class="dota-item neutral" :title="p.neutral_item.name || 'Neutral'">
+                  <img v-if="p.neutral_item.icon_url" :src="p.neutral_item.icon_url" :alt="p.neutral_item.name || ''" />
                   <span v-else class="dota-item-fallback">N</span>
                 </div>
-                <span v-if="p.aghanims_scepter" class="buff-pill scepter" title="Aghanim's Scepter">Ага</span>
-                <span v-if="p.aghanims_shard" class="buff-pill shard" title="Aghanim's Shard">Шард</span>
-                <span v-if="p.moonshard" class="buff-pill moon" title="Moon Shard">Мун</span>
+                <span v-if="p.aghanims_scepter" class="buff-pill scepter">Ага</span>
+                <span v-if="p.aghanims_shard" class="buff-pill shard">Шард</span>
+                <span v-if="p.moonshard" class="buff-pill moon">Мун</span>
               </div>
             </div>
           </div>
         </div>
-
         <div class="dota-team">
           <div class="dota-team-header dire">Dire</div>
           <div
@@ -442,7 +489,6 @@ onMounted(load)
                 </div>
               </div>
             </div>
-
             <div class="dota-stats">
               <div class="dst"><span>GPM</span><b>{{ p.gpm ?? '—' }}</b></div>
               <div class="dst"><span>XPM</span><b>{{ p.xpm ?? '—' }}</b></div>
@@ -453,35 +499,21 @@ onMounted(load)
               <div class="dst"><span>Heal</span><b>{{ p.hero_healing ?? '—' }}</b></div>
               <div class="dst"><span>Denies</span><b>{{ p.denies ?? '—' }}</b></div>
             </div>
-
             <div class="dota-items-row">
               <div class="dota-items">
-                <div
-                  class="dota-item"
-                  v-for="(item, idx) in (p.items || [])"
-                  :key="'it-' + idx"
-                  :title="item.name"
-                >
+                <div class="dota-item" v-for="(item, idx) in (p.items || [])" :key="'it-' + idx" :title="item.name">
                   <img v-if="item.icon_url" :src="item.icon_url" :alt="item.name || ''" />
                   <span v-else class="dota-item-fallback">{{ item.name?.slice(0, 2) }}</span>
                 </div>
               </div>
               <div class="dota-extra-items">
-                <div
-                  v-if="p.neutral_item"
-                  class="dota-item neutral"
-                  :title="p.neutral_item.name || 'Neutral'"
-                >
-                  <img
-                    v-if="p.neutral_item.icon_url"
-                    :src="p.neutral_item.icon_url"
-                    :alt="p.neutral_item.name || ''"
-                  />
+                <div v-if="p.neutral_item" class="dota-item neutral" :title="p.neutral_item.name || 'Neutral'">
+                  <img v-if="p.neutral_item.icon_url" :src="p.neutral_item.icon_url" :alt="p.neutral_item.name || ''" />
                   <span v-else class="dota-item-fallback">N</span>
                 </div>
-                <span v-if="p.aghanims_scepter" class="buff-pill scepter" title="Aghanim's Scepter">Ага</span>
-                <span v-if="p.aghanims_shard" class="buff-pill shard" title="Aghanim's Shard">Шард</span>
-                <span v-if="p.moonshard" class="buff-pill moon" title="Moon Shard">Мун</span>
+                <span v-if="p.aghanims_scepter" class="buff-pill scepter">Ага</span>
+                <span v-if="p.aghanims_shard" class="buff-pill shard">Шард</span>
+                <span v-if="p.moonshard" class="buff-pill moon">Мун</span>
               </div>
             </div>
           </div>

@@ -28,6 +28,7 @@ const platform = computed(() => {
 const sourceLabel = computed(() => {
   if (game.value === 'valorant') return 'Данные Valorant (открытый API)'
   if (game.value === 'faceit') return 'Данные Faceit (открытый API)'
+  if (game.value === 'deadlock') return 'Данные Deadlock API'
   return 'Данные из открытого источника (OpenDota)'
 })
 
@@ -137,6 +138,7 @@ function openMatch(m) {
   const g = game.value
   if (g === 'valorant') openMatchGame.value = 'valorant'
   else if (g === 'faceit') openMatchGame.value = 'faceit'
+  else if (g === 'deadlock') openMatchGame.value = 'deadlock'
   else openMatchGame.value = 'dota2'
   openMatchId.value = matchId
 }
@@ -184,6 +186,16 @@ watch(() => [route.params.game, route.params.externalId], () => load())
             </button>
           </div>
         </div>
+      </div>
+
+      <div class="related-row" v-if="profile.related_games?.length">
+        <span class="related-label">Другие игры</span>
+        <router-link
+          v-for="g in profile.related_games"
+          :key="g.path"
+          :to="g.path"
+          class="btn-secondary"
+        >{{ g.label }}</router-link>
       </div>
 
       <!-- Как у себя: полная карточка Faceit / Dota / Valorant -->
@@ -291,6 +303,12 @@ watch(() => [route.params.game, route.params.externalId], () => load())
     />
     <ValorantMatchModal
       v-if="openMatchId && openMatchGame === 'valorant'"
+      :match-id="openMatchId"
+      @close="closeMatch"
+    />
+    <MatchParticipantsModal
+      v-if="openMatchId && openMatchGame === 'deadlock'"
+      game="deadlock"
       :match-id="openMatchId"
       @close="closeMatch"
     />
@@ -491,6 +509,21 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   cursor: pointer;
 }
 .show-more:hover { border-color: var(--accent); }
+
+.related-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.related-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
 
 .state-message {
   padding: 40px 20px;

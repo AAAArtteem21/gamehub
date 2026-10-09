@@ -39,7 +39,7 @@ const statsAccounts = computed(() =>
   (profile.value?.accounts || []).filter(
     (a) =>
       a.display_stats &&
-      ['opendota', 'faceit', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform)
+      ['opendota', 'faceit', 'deadlock', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform)
   )
 )
 
@@ -131,6 +131,10 @@ function openMatch(matchId) {
   if (p === 'valorant') openMatchGame.value = 'valorant'
   else if (p === 'faceit') openMatchGame.value = 'faceit'
   else if (p === 'opendota' || p === 'dota2') openMatchGame.value = 'dota2'
+  else if (p === 'deadlock') {
+    openMatchGame.value = 'deadlock'
+    openMatchId.value = matchId
+  }
   else return
   openMatchId.value = matchId
 }
