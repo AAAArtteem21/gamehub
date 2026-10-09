@@ -470,208 +470,316 @@ class GuestProfileView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, game, external_id):
-        game = (game or "").lower()
-        if game in ("opendota", "dota"):
-            game = "dota2"
-        if game == "dota2":
+        g = str(game or "").lower().strip()
+        if g in ("dota2", "opendota", "dota"):
             return self._dota_guest(external_id)
-        if game == "valorant":
+        if g == "valorant":
             return self._valorant_guest(external_id)
-        if game == "faceit":
+        if g == "faceit":
             return self._faceit_guest(external_id)
-        if game == "deadlock":
+        if g == "deadlock":
             return self._deadlock_guest(external_id)
         return Response(
-            {"detail": "Гостевой просмотр: dota2, valorant, faceit, deadlock"},
+            {"detail": "Гостевой просмотр поддерживается для Dota 2, Valorant, Faceit, Deadlock"},
             status=400,
         )
 
     def _deadlock_guest(self, external_id):
-        from .integrations.deadlock_client import DeadlockClient, DeadlockError
-        from .serivces import build_display_stats, ProfileSyncService
-        from .models import GameAccount
-
-        raw = (external_id or "").strip()
-        if not raw.isdigit():
-            return Response({"detail": "Deadlock: account_id (число)"}, status=400)
-
-        account_id = int(raw) & 0xFFFFFFFF
-
-        # reuse sync logic via temporary fake account object is heavy —
-        # call client + same parsing by instantiating service on ephemeral data
-        client = DeadlockClient()
-        try:
-            matches = client.get_match_history(account_id) or []
-        except DeadlockError as e:
-            return Response({"detail": str(e)}, status=404)
-        except Exception:
-            return Response({"detail": "Не удалось загрузить Deadlock"}, status=502)
-
-        if isinstance(matches, dict):
-            matches = matches.get("matches") or []
-
-        # lightweight: build GameAccount-like extra via ProfileSyncService pattern
-        # create ephemeral dict by running sync helpers
-        from django.core.cache import cache
+        """
+        Гостевой профиль Deadlock: rank + history + Steam ник/аватар + related_games.
+        """
         from datetime import datetime
         from collections import Counter
+        from django.core.cache import cache
+        from .integrations.deadlock_client import DeadlockClient, DeadlockError, DeadlockRateLimited
+        from .serivces import build_display_stats  # если файл services.py — from .services import ...
 
-        rank_raw = None
-        try:
-            rank_raw = client.get_rank(account_id)
-        except Exception:
-            pass
-        hero_stats_raw = None
-        try:
-            hero_stats_raw = client.get_hero_stats(account_id)
-        except Exception:
-            pass
-
-        hero_names = cache.get("deadlock:hero_names") or {}
-        if not hero_names:
+        raw = str(external_id or "").strip()
+        if raw.startswith("7656119"):
             try:
-                heroes = client.get_heroes() or []
-                hero_names = {
-                    int(h["id"]): (h.get("name") or f"Hero {h['id']}")
-                    for h in heroes if isinstance(h, dict) and h.get("id") is not None
-                }
-                cache.set("deadlock:hero_names", hero_names, timeout=86400)
-            except Exception:
-                hero_names = {}
-
-        def _won(m):
-            if m.get("player_won") is not None:
-                return bool(m.get("player_won"))
-            pt, mr = m.get("player_team"), m.get("match_result")
-            if pt is not None and mr is not None:
-                try:
-                    return int(pt) == int(mr)
-                except (TypeError, ValueError):
-                    return False
-            return False
-
-        def _kda(m):
-            k = m.get("player_kills", m.get("kills", 0)) or 0
-            d = m.get("player_deaths", m.get("deaths", 0)) or 0
-            a = m.get("player_assists", m.get("assists", 0)) or 0
-            return int(k), int(d), int(a)
-
-        rank_value = None
-        if isinstance(rank_raw, dict):
-            for k in ("ranked_display_badge", "rank", "badge", "ranked_badge_level"):
-                if isinstance(rank_raw.get(k), (int, float)):
-                    rank_value = int(rank_raw[k])
-                    break
-        elif isinstance(rank_raw, (int, float)):
-            rank_value = int(rank_raw)
-
-        total = len(matches)
-        wins = sum(1 for m in matches if _won(m))
-        losses = total - wins
-        k_sum = d_sum = a_sum = n = 0
-        history = []
-        hero_counter = Counter()
-
-        for m in matches[:40]:
-            hid = m.get("hero_id")
-            try:
-                hid = int(hid) if hid is not None else None
+                account_id = str(int(raw) & 0xFFFFFFFF)
             except (TypeError, ValueError):
-                hid = None
-            name = hero_names.get(hid, f"Hero {hid}") if hid else "?"
-            if hid:
-                hero_counter[hid] += 1
-            k, d, a = _kda(m)
-            k_sum += k
-            d_sum += d
-            a_sum += a
-            n += 1
-            dur = m.get("match_duration_s", m.get("duration_s"))
-            played_at = None
-            if m.get("start_time"):
-                try:
-                    played_at = datetime.fromtimestamp(int(m["start_time"])).strftime("%d.%m.%Y")
-                except Exception:
-                    pass
-            history.append({
-                "won": _won(m),
-                "title": name,
-                "subtitle": f"{k}/{d}/{a}",
-                "match_id": m.get("match_id"),
-                "duration": f"{round(int(dur)/60)} мин" if dur else None,
-                "played_at": played_at,
-                "details": [
-                    {"label": "LH/Denies", "value": f"{m.get('last_hits') or 0}/{m.get('denies') or 0}"},
-                    {"label": "Net worth", "value": m.get("net_worth") or "—"},
-                    {"label": "Уровень", "value": m.get("hero_level") or "—"},
-                ],
-            })
+                account_id = raw
+        else:
+            account_id = raw
 
-        top_heroes = []
-        for hid, cnt in hero_counter.most_common(8):
-            hw = sum(1 for m in matches if m.get("hero_id") == hid and _won(m))
-            top_heroes.append({
-                "name": hero_names.get(hid, f"Hero {hid}"),
-                "games": cnt,
-                "winrate": round(hw / cnt * 100, 1) if cnt else 0,
-            })
-
-        extra = {
-            "matches": total,
-            "wins": wins,
-            "losses": losses,
-            "winrate": round(wins / total * 100, 1) if total else 0,
-            "rank": rank_value,
-            "avg_kills": round(k_sum / n, 1) if n else None,
-            "avg_deaths": round(d_sum / n, 1) if n else None,
-            "avg_assists": round(a_sum / n, 1) if n else None,
-            "sample_size": n,
-            "top_heroes": top_heroes,
-            "match_history": history,
-            "recent_form": ["W" if m["won"] else "L" for m in history[:12]],
-        }
-        if n:
-            extra["avg_kda"] = (
-                f"{extra['avg_kills']}/{extra['avg_deaths']}/{extra['avg_assists']} "
-                f"({round((k_sum+a_sum)/max(d_sum,1), 2)})"
+        if not account_id.isdigit():
+            return Response(
+                {"detail": "Некорректный Deadlock / Steam32 id"},
+                status=400,
             )
 
-        gh = GameAccount.objects.filter(
-            platform="deadlock", external_id=str(account_id)
-        ).select_related("user").first()
-        if not gh:
-            # also match steam32 from full steam id stored as external
-            gh = GameAccount.objects.filter(
-                platform="deadlock", external_id=str(int(raw) & 0xFFFFFFFF)
-            ).select_related("user").first()
+        cache_key = f"deadlock:guest:{account_id}:v3"
+        cached = cache.get(cache_key)
 
-        # cross-games same account_id
-        related = []
-        related.append({
-            "game": "dota2",
-            "label": "Dota 2",
-            "path": f"/players/guest/dota2/{account_id}",
-        })
-        related.append({
-            "game": "deadlock",
-            "label": "Deadlock",
-            "path": f"/players/guest/deadlock/{account_id}",
-        })
+        if cached is None:
+            client = DeadlockClient()
+            try:
+                rank_raw = client.get_rank(account_id) or {}
+            except (DeadlockRateLimited, DeadlockError, Exception):
+                rank_raw = {}
 
-        return Response({
-            "is_public": True,
-            "display_name": f"Deadlock #{account_id}",
-            "avatar_url": None,
-            "is_gamehub_user": bool(gh),
-            "gamehub_user_id": gh.user_id if gh else None,
-            "wins": wins,
-            "losses": losses,
-            "rank": rank_value,
-            "match_history": history,
-            "top_heroes": top_heroes,
-            "display_stats": build_display_stats("deadlock", extra),
-            "related_games": related,
-        })
+            try:
+                matches_raw = client.get_match_history(account_id) or []
+            except DeadlockRateLimited:
+                return Response(
+                    {"detail": "Deadlock API: лимит запросов, подожди минуту"},
+                    status=429,
+                )
+            except Exception as e:
+                matches_raw = []
+
+            if isinstance(matches_raw, dict):
+                matches_raw = (
+                    matches_raw.get("matches")
+                    or matches_raw.get("data")
+                    or matches_raw.get("history")
+                    or []
+                )
+            if not isinstance(matches_raw, list):
+                matches_raw = []
+
+            # --- hero names, только str-ключи ---
+            hero_names = cache.get("deadlock:hero_names") or {}
+            if hero_names and any(not isinstance(k, str) for k in hero_names.keys()):
+                hero_names = {str(k): v for k, v in hero_names.items()}
+                cache.set("deadlock:hero_names", hero_names, 3600)
+
+            if not hero_names:
+                try:
+                    heroes = client.get_heroes() or []
+                    if isinstance(heroes, dict):
+                        heroes = heroes.get("heroes") or heroes.get("data") or []
+                    if isinstance(heroes, list):
+                        hero_names = {}
+                        for h in heroes:
+                            if not isinstance(h, dict):
+                                continue
+                            hid = h.get("id") if h.get("id") is not None else h.get("hero_id")
+                            if hid is None:
+                                continue
+                            name = (
+                                h.get("name")
+                                or h.get("display_name")
+                                or h.get("class_name")
+                                or h.get("localized_name")
+                                or str(hid)
+                            )
+                            name = str(name).replace("hero_", "").replace("_", " ").title()
+                            hero_names[str(hid)] = name
+                        if hero_names:
+                            cache.set("deadlock:hero_names", hero_names, 3600)
+                except Exception:
+                    hero_names = {}
+
+            def _won(m):
+                outcome = m.get("player_match_outcome")
+                if outcome is not None:
+                    if outcome in (1, True, "win", "Won", "WIN"):
+                        return True
+                    if outcome in (0, 2, False, "loss", "Loss", "LOSE", "lost"):
+                        return False
+                if m.get("player_won") is not None:
+                    return bool(m["player_won"])
+                pt, mr = m.get("player_team"), m.get("match_result")
+                if pt is not None and mr is not None:
+                    try:
+                        return int(pt) == int(mr)
+                    except (TypeError, ValueError):
+                        pass
+                return None
+
+            def _kda(m):
+                k = m.get("player_kills", m.get("kills", 0)) or 0
+                d = m.get("player_deaths", m.get("deaths", 0)) or 0
+                a = m.get("player_assists", m.get("assists", 0)) or 0
+                try:
+                    return int(k), int(d), int(a)
+                except (TypeError, ValueError):
+                    return 0, 0, 0
+
+            match_history = []
+            hero_counter = Counter()
+            wins = losses = 0
+            k_sum = d_sum = a_sum = n_kda = 0
+            nw_sum = nw_n = 0
+
+            for m in matches_raw[:40]:
+                if not isinstance(m, dict):
+                    continue
+                hid = m.get("hero_id")
+                hname = hero_names.get(str(hid), f"Hero {hid}" if hid is not None else "?")
+                won = _won(m)
+                k, d, a = _kda(m)
+
+                if won is True:
+                    wins += 1
+                elif won is False:
+                    losses += 1
+
+                k_sum += k
+                d_sum += d
+                a_sum += a
+                n_kda += 1
+                if hname and not str(hname).startswith("Hero "):
+                    hero_counter[hname] += 1
+                elif hname and hname != "?":
+                    hero_counter[hname] += 1
+
+                mid = m.get("match_id") or m.get("id")
+                dur_s = m.get("match_duration_s") or m.get("duration_s") or m.get("duration")
+                duration = None
+                if dur_s is not None:
+                    try:
+                        sec = int(dur_s)
+                        duration = f"{sec // 60}:{sec % 60:02d}"
+                    except (TypeError, ValueError):
+                        duration = None
+
+                played_at = None
+                ts = m.get("start_time") or m.get("match_start")
+                if ts is not None:
+                    try:
+                        played_at = datetime.utcfromtimestamp(int(ts)).strftime("%d.%m.%Y")
+                    except Exception:
+                        played_at = str(ts)
+
+                nw = m.get("net_worth")
+                if nw is not None:
+                    try:
+                        nw_sum += int(nw)
+                        nw_n += 1
+                    except (TypeError, ValueError):
+                        pass
+
+                level = m.get("hero_level") or m.get("level")
+                details = [
+                    {"label": "Net worth", "value": nw if nw is not None else "—"},
+                    {"label": "Уровень", "value": level if level is not None else "—"},
+                    {"label": "Last hits", "value": m.get("last_hits", "—")},
+                    {"label": "Denies", "value": m.get("denies", "—")},
+                ]
+
+                match_history.append({
+                    "won": won,
+                    "title": hname,
+                    "subtitle": f"{k}/{d}/{a}",
+                    "duration": duration,
+                    "match_id": str(mid) if mid is not None else None,
+                    "played_at": played_at,
+                    "verdict": None,
+                    "details": details,
+                })
+
+            total = wins + losses
+            winrate = round(wins / total * 100, 1) if total else 0
+            avg_kda = None
+            if n_kda:
+                ratio = round((k_sum + a_sum) / max(d_sum, 1), 2)
+                avg_kda = (
+                    f"{round(k_sum / n_kda, 1)}/"
+                    f"{round(d_sum / n_kda, 1)}/"
+                    f"{round(a_sum / n_kda, 1)} ({ratio})"
+                )
+            avg_nw = round(nw_sum / nw_n) if nw_n else None
+
+            badge = rank_raw.get("badge") or rank_raw.get("rank") or 0
+            subrank = rank_raw.get("subrank") or 0
+            try:
+                badge = int(badge)
+            except (TypeError, ValueError):
+                badge = 0
+            try:
+                subrank = int(subrank)
+            except (TypeError, ValueError):
+                subrank = 0
+
+            tier = None
+            rdb = rank_raw.get("ranked_display_badge")
+            if isinstance(rdb, dict):
+                tier = rdb.get("name") or rdb.get("text") or rdb.get("label")
+            elif isinstance(rdb, str) and rdb.strip():
+                tier = rdb.strip()
+            if not tier and badge:
+                tier = f"Badge {badge}" + (f".{subrank}" if subrank else "")
+            if not tier:
+                tier = "Unranked"
+
+            top_heroes = [{"name": n, "games": c} for n, c in hero_counter.most_common(8)]
+            recent_form = [
+                ("W" if m["won"] else "L")
+                for m in match_history
+                if m.get("won") is not None
+            ][:10]
+
+            extra = {
+                "matches": total if total else len(match_history),
+                "wins": wins,
+                "losses": losses,
+                "winrate": winrate,
+                "tier": tier,
+                "badge": badge,
+                "subrank": subrank,
+                "avg_kda": avg_kda,
+                "avg_net_worth": avg_nw,
+                "top_heroes": top_heroes,
+                "recent_form": recent_form,
+                "match_history": match_history,
+            }
+
+            # Steam ник + аватар
+            display_name = f"Deadlock #{account_id}"
+            avatar_url = None
+            try:
+                steam64 = str(int(account_id) + 76561197960265728)
+                from .integrations.steam_client import SteamClient
+                players = SteamClient().get_player_summaries([steam64]) or []
+                if players:
+                    row = players[0]
+                    display_name = row.get("personaname") or display_name
+                    avatar_url = (
+                        row.get("avatarfull")
+                        or row.get("avatarmedium")
+                        or row.get("avatar")
+                    )
+            except Exception:
+                pass
+
+            # related games (тот же Steam32)
+            related = [{"game": "deadlock", "label": "Deadlock", "external_id": account_id}]
+            related.append({"game": "dota2", "label": "Dota 2", "external_id": account_id})
+
+            is_empty = (wins == 0 and losses == 0 and not match_history)
+
+            payload = {
+                "platform": "deadlock",
+                "game": "deadlock",
+                "external_id": account_id,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
+                "wins": wins,
+                "losses": losses,
+                "matches": extra["matches"],
+                "winrate": winrate,
+                "tier": tier,
+                "badge": badge,
+                "avg_kda": avg_kda,
+                "match_history": match_history,
+                "top_heroes": top_heroes,
+                "recent_form": recent_form,
+                "display_stats": build_display_stats("deadlock", extra),
+                "related_games": related,
+                "is_empty": is_empty,
+                "empty_reason": (
+                    "Статистика недоступна: профиль скрыт, нет матчей или id неверный"
+                    if is_empty
+                    else None
+                ),
+            }
+            cache.set(cache_key, payload, 300)
+            cached = payload
+
+        return Response(cached)
 
     def _faceit_guest(self, external_id):
         from .integrations.faceit_client import FaceitClient, FaceitError

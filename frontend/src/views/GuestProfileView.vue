@@ -180,7 +180,9 @@ watch(() => [route.params.game, route.params.externalId], () => load())
       <div class="profile-header card">
         <div
           class="avatar-big"
-          :style="profile.avatar_url ? { backgroundImage: `url(${profile.avatar_url})` } : {}"
+          :style="profile.avatar_url
+            ? { backgroundImage: `url(${profile.avatar_url})` }
+            : {}"
         >
           <span v-if="!profile.avatar_url">?</span>
         </div>
