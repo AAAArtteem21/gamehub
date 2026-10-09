@@ -18,6 +18,7 @@ WEEKLY_GAMES = {
     "dota2": {"key": "dota2", "label": "Dota 2"},
     "valorant": {"key": "valorant", "label": "Valorant"},
     "faceit": {"key": "cs2", "label": "CS2"},
+    "deadlock": {"key": "deadlock", "label": "Deadlock"},
 }
 
 GAME_META = {
@@ -29,10 +30,11 @@ GAME_META = {
     "lol": {"key": "lol", "label": "League of Legends"},
     "fortnite": {"key": "fortnite", "label": "Fortnite"},
     "pubg": {"key": "pubg", "label": "PUBG"},
+    "deadlock": {"key": "deadlock", "label": "Deadlock"},
 }
 
 
-def _primary_account(user, platforms=("opendota", "valorant", "faceit", "lol")):
+def _primary_account(user, platforms=("opendota", "valorant", "faceit", "lol", "deadlock")):
     return (
         GameAccount.objects.filter(user=user, verified=True, platform__in=platforms)
         .exclude(extra_stats__isnull=True)
@@ -448,6 +450,9 @@ class ComparePlayersView(APIView):
                 "games": [game],
             }
 
+        if platform == "deadlock":
+            return self._deadlock_guest_block(external_id, meta)
+
         if platform == "faceit":
             try:
                 extra = _faceit_extra_live(external_id)
@@ -613,6 +618,119 @@ class ComparePlayersView(APIView):
             "extra": {"mmr": mmr, "rank_tier": player.get("rank_tier")},
             "_avatar": profile.get("avatarfull"),
             "_name": profile.get("personaname") or external_id,
+        }
+
+    def _deadlock_guest_block(self, external_id, meta):
+        from .integrations.deadlock_client import DeadlockClient
+        from django.core.cache import cache
+        from datetime import datetime
+        from collections import Counter
+
+        client = DeadlockClient()
+        aid = str(external_id).strip()
+        if aid.startswith("7656119"):
+            try:
+                aid = str(int(aid) & 0xFFFFFFFF)
+            except ValueError:
+                pass
+
+        try:
+            rank_raw = client.get_rank(aid) or {}
+        except Exception:
+            rank_raw = {}
+        try:
+            matches_raw = client.get_match_history(aid) or []
+        except Exception:
+            matches_raw = []
+        if isinstance(matches_raw, dict):
+            matches_raw = matches_raw.get("matches") or matches_raw.get("data") or []
+        if not isinstance(matches_raw, list):
+            matches_raw = []
+
+        hero_names = cache.get("deadlock:hero_names") or {}
+        badge = rank_raw.get("badge") or 0
+        try:
+            badge = int(badge)
+        except (TypeError, ValueError):
+            badge = 0
+
+        def _won(m):
+            pt, mr = m.get("player_team"), m.get("match_result")
+            if pt is not None and mr is not None:
+                try:
+                    return int(pt) == int(mr)
+                except (TypeError, ValueError):
+                    pass
+            return None
+
+        wins = losses = 0
+        form = []
+        hero_counter = Counter()
+        k_sum = d_sum = a_sum = n = 0
+        for m in matches_raw[:30]:
+            if not isinstance(m, dict):
+                continue
+            won = _won(m)
+            if won is True:
+                wins += 1
+                form.append("W")
+            elif won is False:
+                losses += 1
+                form.append("L")
+            hid = m.get("hero_id")
+            hname = hero_names.get(str(hid), f"Hero {hid}" if hid is not None else "?")
+            if hname and hname != "?":
+                hero_counter[hname] += 1
+            k = int(m.get("player_kills") or 0)
+            d = int(m.get("player_deaths") or 0)
+            a = int(m.get("player_assists") or 0)
+            k_sum += k
+            d_sum += d
+            a_sum += a
+            n += 1
+
+        total = wins + losses
+        avg_kda = None
+        if n:
+            ratio = round((k_sum + a_sum) / max(d_sum, 1), 2)
+            avg_kda = f"{round(k_sum/n,1)}/{round(d_sum/n,1)}/{round(a_sum/n,1)} ({ratio})"
+
+        # steam name optional
+        display = aid
+        avatar = None
+        try:
+            from .integrations.steam_client import SteamClient
+            sid64 = str(int(aid) + 76561197960265728)
+            rows = SteamClient().get_player_summaries([sid64]) or []
+            if rows:
+                display = rows[0].get("personaname") or display
+                avatar = rows[0].get("avatarfull")
+        except Exception:
+            pass
+
+        return {
+            "kind": "guest",
+            "display_name": display,
+            "username": None,
+            "avatar_url": avatar,
+            "games": [{
+                "key": "deadlock",
+                "label": "Deadlock",
+                "platform": "deadlock",
+                "game_label": "Deadlock",
+                "skill_rating": badge or None,
+                "tier": f"Badge {badge}" if badge else "Unranked",
+                "wins": wins,
+                "losses": losses,
+                "matches": total or len(matches_raw),
+                "winrate": round(wins / total * 100, 1) if total else 0,
+                "avg_kda": avg_kda,
+                "top_heroes": [{"name": n, "games": c} for n, c in hero_counter.most_common(8)],
+                "recent_form": form[:10],
+                "verdicts": [],
+                "win_streak": 0,
+                "extra": {"badge": badge},
+            }],
         }
 
     def _diff(self, a, b):

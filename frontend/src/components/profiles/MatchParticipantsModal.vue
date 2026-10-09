@@ -43,10 +43,10 @@ const radiantPlayers = computed(() => participants.value.filter((p) => p.is_radi
 const direPlayers = computed(() => participants.value.filter((p) => !p.is_radiant))
 
 const deadlockTeam0 = computed(() =>
-  participants.value.filter((p) => p.team === 0 || p.is_team0 === true)
+  participants.value.filter((p) => Number(p.team) === 0)
 )
 const deadlockTeam1 = computed(() =>
-  participants.value.filter((p) => p.team === 1 || p.is_team0 === false)
+  participants.value.filter((p) => Number(p.team) === 1)
 )
 
 function canOpenProfile(p) {
@@ -176,7 +176,7 @@ onMounted(load)
             <span class="v-map">Deadlock</span>
             <span v-if="duration">{{ fmtDuration(duration) }}</span>
             <span class="v-winner-tag" v-if="matchData.winning_team != null">
-              Team {{ matchData.winning_team }} win
+              Победа команды {{ Number(matchData.winning_team) + 1 }}
             </span>
           </span>
         </div>
@@ -345,7 +345,10 @@ onMounted(load)
       <template v-else-if="isDeadlock">
         <div class="v-teams">
           <div class="v-team red-side">
-            <div class="v-team-header"><span>Team 0</span></div>
+            <div class="v-team-header">
+              <span>Команда 1</span>
+              <span v-if="matchData.winning_team === 0 || matchData.winning_team === '0'">🏆</span>
+            </div>
             <div
               v-for="p in deadlockTeam0"
               :key="'t0-' + (p.account_id || p.display_name)"
@@ -353,7 +356,8 @@ onMounted(load)
               :class="{ clickable: canOpenProfile(p) }"
               @click="goToPlayer(p)"
             >
-              <div class="v-player-avatar placeholder">
+              <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
+              <div v-else class="v-player-avatar placeholder">
                 {{ (p.display_name || '?')[0]?.toUpperCase() }}
               </div>
               <div class="v-player-info">
@@ -373,8 +377,12 @@ onMounted(load)
             </div>
             <div v-if="!deadlockTeam0.length" class="state" style="padding: 16px 0">Нет игроков</div>
           </div>
+
           <div class="v-team blue-side">
-            <div class="v-team-header"><span>Team 1</span></div>
+            <div class="v-team-header">
+              <span>Команда 2</span>
+              <span v-if="matchData.winning_team === 1 || matchData.winning_team === '1'">🏆</span>
+            </div>
             <div
               v-for="p in deadlockTeam1"
               :key="'t1-' + (p.account_id || p.display_name)"
@@ -382,7 +390,8 @@ onMounted(load)
               :class="{ clickable: canOpenProfile(p) }"
               @click="goToPlayer(p)"
             >
-              <div class="v-player-avatar placeholder">
+              <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
+              <div v-else class="v-player-avatar placeholder">
                 {{ (p.display_name || '?')[0]?.toUpperCase() }}
               </div>
               <div class="v-player-info">

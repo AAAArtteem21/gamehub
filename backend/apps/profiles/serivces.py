@@ -291,6 +291,10 @@ class ProfileSyncService:
 
         # --- hero names ---
         hero_names = cache.get("deadlock:hero_names") or {}
+        if hero_names and any(not isinstance(k, str) for k in hero_names.keys()):
+            hero_names = {str(k): v for k, v in hero_names.items()}
+            cache.set("deadlock:hero_names", hero_names, 3600)
+
         if not hero_names:
             try:
                 heroes = client.get_heroes() or []
@@ -308,8 +312,10 @@ class ProfileSyncService:
                             h.get("name")
                             or h.get("display_name")
                             or h.get("class_name")
+                            or h.get("localized_name")
                             or str(hid)
                         )
+                        name = str(name).replace("hero_", "").replace("_", " ").title()
                         hero_names[str(hid)] = name
                     if hero_names:
                         cache.set("deadlock:hero_names", hero_names, 3600)
@@ -1637,162 +1643,65 @@ def build_display_stats(platform, extra_stats):
         if losses is None and matches:
             losses = max(matches - wins, 0)
         wr = extra_stats.get("winrate")
-        rank = extra_stats.get("rank")
-        rank_name = extra_stats.get("rank_name")
-        hours = extra_stats.get("hours_played")
+        badge = extra_stats.get("badge")
+        tier = extra_stats.get("tier") or (
+            f"Badge {badge}" if badge else "Unranked"
+        )
         top_heroes = extra_stats.get("top_heroes") or []
         form = extra_stats.get("recent_form") or []
-        sample = extra_stats.get("sample_size") or 0
+        avg_kda = extra_stats.get("avg_kda")
+        avg_nw = extra_stats.get("avg_net_worth")
+        hours = extra_stats.get("hours_played")
 
         metrics = [
             {"label": "матчей", "value": matches},
             {"label": "побед", "value": wins, "tone": "win"},
-            {"label": "пораж.", "value": losses if losses is not None else "—", "tone": "loss"},
+            {
+                "label": "пораж.",
+                "value": losses if losses is not None else "—",
+                "tone": "loss",
+            },
             {
                 "label": "винрейт",
                 "value": f"{wr}%" if wr is not None else "—",
                 "tone": "accent",
             },
         ]
-        if extra_stats.get("avg_kills") is not None:
-            metrics.append({
-                "label": f"ср. килы ({sample})",
-                "value": extra_stats["avg_kills"],
-                "tone": "accent",
-            })
-        if extra_stats.get("avg_net_worth") is not None:
-            metrics.append({"label": "ср. NW", "value": extra_stats["avg_net_worth"]})
+        if avg_nw is not None:
+            metrics.append({"label": "ср. NW", "value": avg_nw})
         if hours is not None:
             metrics.append({"label": "часов", "value": hours})
 
-        badge = rank_name or (f"Rank {rank}" if rank is not None else "Deadlock")
         tags = []
-        if rank is not None and rank_name:
-            tags.append({"label": f"Badge {rank}"})
-        if extra_stats.get("avg_kda"):
-            tags.append({"label": f"KDA {extra_stats['avg_kda']}"})
+        if avg_kda:
+            tags.append({"label": f"KDA {avg_kda}"})
         if form:
-            tags.append({"label": "Форма " + "".join(form[:10])})
+            tags.append({"label": "Форма " + "".join(str(x) for x in form[:10])})
 
         return {
             "game_label": "Deadlock",
             "metrics": metrics[:8],
-            "badge": badge,
+            "badge": tier,
             "tags": tags,
             "list_title": "Любимые герои" if top_heroes else "",
             "list": [
                 {
-                    "name": h["name"],
+                    "name": h.get("name") or "?",
                     "sub": f"{h.get('games', 0)} игр",
-                    "value": f"{h.get('winrate', 0)}%",
-                    "good": (h.get("winrate") or 0) >= 50,
+                    "value": str(h.get("games", 0)),
+                    "good": True,
                 }
                 for h in top_heroes
             ],
             "list_title_2": "Сводка",
             "list_2": [
-                {"name": "Rank badge", "value": rank if rank is not None else "—"},
-                {"name": "Ср. K/D/A", "value": (
-                    f"{extra_stats.get('avg_kills')}/{extra_stats.get('avg_deaths')}/{extra_stats.get('avg_assists')}"
-                    if extra_stats.get("avg_kills") is not None else "—"
-                )},
-                {"name": "Ср. net worth", "value": extra_stats.get("avg_net_worth") or "—"},
-                {"name": "Выборка", "value": sample or "—"},
-            ],
-            "match_history": extra_stats.get("match_history") or [],
-        }
-    
-    if platform == "faceit":
-        skill = extra_stats.get("skill_level")
-        elo = extra_stats.get("faceit_elo")
-        wr = extra_stats.get("winrate")
-        kd = extra_stats.get("kd")
-        hs = extra_stats.get("hs_percent")
-        matches = extra_stats.get("matches") or 0
-        wins = extra_stats.get("wins") or 0
-        game_id = (extra_stats.get("game_id") or "cs2").upper()
-        avg_k = extra_stats.get("avg_kills")
-        avg_d = extra_stats.get("avg_deaths")
-        avg_a = extra_stats.get("avg_assists")
-        avg_kd_r = extra_stats.get("avg_kd_recent")
-        adr = extra_stats.get("adr")
-        entry = extra_stats.get("entry_success")
-        kr = extra_stats.get("kr")
-        sample = extra_stats.get("sample_size") or 0
-
-        metrics = [
-            {"label": "матчей", "value": matches},
-            {"label": "побед", "value": wins, "tone": "win"},
-            {
-                "label": "винрейт",
-                "value": f"{wr}%" if wr is not None else "—",
-                "tone": "accent",
-            },
-            {"label": "K/D", "value": kd if kd is not None else "—", "tone": "accent"},
-        ]
-        if elo is not None:
-            metrics.append({"label": "ELO", "value": elo, "tone": "accent"})
-        if skill is not None:
-            metrics.append({"label": "LVL", "value": skill})
-        if avg_k is not None:
-            metrics.append({
-                "label": f"ср. килы ({sample})",
-                "value": avg_k,
-                "tone": "accent",
-            })
-        if adr is not None:
-            metrics.append({"label": "ADR", "value": adr, "tone": "accent"})
-        if avg_kd_r is not None:
-            metrics.append({"label": "K/D (20)", "value": avg_kd_r})
-        if kr is not None:
-            metrics.append({"label": "K/R", "value": kr})
-
-        tags = []
-        if hs is not None:
-            tags.append({"label": f"HS {hs}%"})
-        if avg_d is not None:
-            tags.append({"label": f"ср. смерти {avg_d}"})
-        if avg_a is not None:
-            tags.append({"label": f"ср. ассисты {avg_a}"})
-        if entry is not None:
-            tags.append({"label": f"Entry {entry}%"})
-        if extra_stats.get("country"):
-            tags.append({"label": str(extra_stats["country"]).upper()})
-        form = extra_stats.get("recent_form") or []
-        if form:
-            tags.append({"label": "Форма " + "".join(form[:8])})
-
-        top_maps = extra_stats.get("top_maps") or []
-        list_rows = [
-            {
-                "name": m["name"],
-                "sub": f"{m.get('matches', 0)} матчей",
-                "value": f"{m.get('winrate', 0)}% · KD {m.get('kd') or '—'}",
-                "good": (m.get("winrate") or 0) >= 50,
-            }
-            for m in top_maps[:6]
-        ]
-
-        return {
-            "game_label": extra_stats.get("game_label") or f"Faceit {game_id}",
-            "metrics": metrics[:10],
-            "badge": f"Level {skill}" if skill is not None else "Faceit",
-            "tags": tags,
-            "list_title": "Топ карты" if list_rows else "",
-            "list": list_rows,
-            "list_title_2": "Сводка (последние матчи)",
-            "list_2": [
-                {"name": "Игра", "value": game_id},
-                {"name": "ELO", "value": elo if elo is not None else "—"},
-                {"name": "Уровень", "value": skill if skill is not None else "—"},
-                {"name": "HS % (lifetime)", "value": hs if hs is not None else "—"},
-                {"name": "ADR", "value": adr if adr is not None else "—"},
-                {"name": "Entry success", "value": f"{entry}%" if entry is not None else "—"},
+                {"name": "Rank / tier", "value": tier},
+                {"name": "Badge", "value": badge if badge is not None else "—"},
+                {"name": "Ср. K/D/A", "value": avg_kda or "—"},
                 {
-                    "name": f"Ср. K/D/A за {sample or 20}",
-                    "value": f"{avg_k or '—'} / {avg_d or '—'} / {avg_a or '—'}",
+                    "name": "Ср. net worth",
+                    "value": avg_nw if avg_nw is not None else "—",
                 },
-                {"name": "K/D за выборку", "value": avg_kd_r if avg_kd_r is not None else "—"},
             ],
             "match_history": extra_stats.get("match_history") or [],
         }
