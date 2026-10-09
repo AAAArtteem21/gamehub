@@ -45,6 +45,9 @@ class DeadlockClient:
             return r.json()
         raise DeadlockError("Deadlock API: ошибка")
 
+    def get_match_metadata(self, match_id):
+        return self._get(f"/v1/matches/{match_id}/metadata")
+
     def get_rank(self, account_id):
         return self._get(f"/v1/players/{account_id}/rank")
 
