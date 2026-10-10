@@ -51,7 +51,11 @@ class DeadlockClient:
     def get_rank(self, account_id):
         return self._get(f"/v1/players/{account_id}/rank")
 
-    def get_match_history(self, account_id, only_stored=False):
+    def get_match_history(self, account_id, *, only_stored=True):
+        """
+        only_stored=True — больше матчей из БД API, без жёсткого IP-лимита.
+        force_refetch — только вручную/редко: тянет Steam, лимит 1/час.
+        """
         params = {}
         if only_stored:
             params["only_stored_history"] = "true"
