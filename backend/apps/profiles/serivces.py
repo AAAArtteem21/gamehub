@@ -1752,6 +1752,82 @@ def build_display_stats(platform, extra_stats):
             "match_history": hist,
         }
 
+    if platform == "faceit":
+        matches = extra_stats.get("matches") or 0
+        wins = extra_stats.get("wins") or 0
+        wr = extra_stats.get("winrate")
+        elo = extra_stats.get("faceit_elo")
+        lvl = extra_stats.get("skill_level")
+        kd = extra_stats.get("kd")
+        hs = extra_stats.get("hs_percent")
+        adr = extra_stats.get("adr")
+        form = extra_stats.get("recent_form") or []
+        top_maps = extra_stats.get("top_maps") or []
+        hist = extra_stats.get("match_history") or []
+
+        metrics = [
+            {"label": "матчей", "value": matches},
+            {"label": "побед", "value": wins, "tone": "win"},
+            {
+                "label": "винрейт",
+                "value": f"{wr}%" if wr is not None else "—",
+                "tone": "accent",
+            },
+            {"label": "ELO", "value": elo if elo is not None else "—", "tone": "accent"},
+        ]
+        if kd is not None:
+            metrics.append({"label": "K/D", "value": kd})
+        if extra_stats.get("avg_kills") is not None:
+            metrics.append({
+                "label": "ср. килы",
+                "value": extra_stats["avg_kills"],
+                "tone": "accent",
+            })
+        if adr is not None:
+            metrics.append({"label": "ADR", "value": adr})
+
+        badge = None
+        if lvl is not None:
+            badge = f"Level {lvl}"
+            if elo is not None:
+                badge = f"Lvl {lvl} · {elo} ELO"
+
+        tags = []
+        if hs is not None:
+            tags.append({"label": f"HS {hs}%"})
+        if extra_stats.get("avg_kd_recent") is not None:
+            tags.append({"label": f"K/D recent {extra_stats['avg_kd_recent']}"})
+        if form:
+            tags.append({"label": "Форма " + "".join(str(x) for x in form[:10])})
+
+        return {
+            "game_label": extra_stats.get("game_id")
+                and f"Faceit {(extra_stats.get('game_id') or 'cs2').upper()}"
+                or "Faceit CS2",
+            "metrics": metrics[:8],
+            "badge": badge,
+            "tags": tags,
+            "list_title": "Топ карты" if top_maps else "",
+            "list": [
+                {
+                    "name": m.get("name") or "?",
+                    "sub": f"{m.get('matches') or m.get('games') or 0} игр",
+                    "value": f"{m.get('winrate', m.get('wr', '—'))}%",
+                    "good": float(m.get("winrate") or m.get("wr") or 0) >= 50,
+                }
+                for m in top_maps[:8]
+            ],
+            "list_title_2": "Сводка",
+            "list_2": [
+                {"name": "ELO", "value": elo if elo is not None else "—"},
+                {"name": "Level", "value": lvl if lvl is not None else "—"},
+                {"name": "K/D", "value": kd if kd is not None else "—"},
+                {"name": "HS %", "value": hs if hs is not None else "—"},
+                {"name": "ADR", "value": adr if adr is not None else "—"},
+            ],
+            "match_history": hist,
+        }
+
     if platform == "valorant":
         metrics = [
             {"label": "матчей", "value": extra_stats.get("matches", 0)},
