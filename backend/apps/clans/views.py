@@ -166,47 +166,38 @@ class ClanViewSet(viewsets.ModelViewSet):
 
 
 class ClanLeaderboardView(APIView):
-    """GET /api/clans/leaderboard/ — топ кланов по активности за 30 дней"""
+    """GET /api/clans/leaderboard/ — топ кланов по часам за 2 недели"""
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        from .services import _period_activity
-        from django.utils import timezone as dj_timezone
-        from datetime import timedelta
-        from django.db.models import Count
+        from collections import defaultdict
+        from .services import get_users_playtime
 
-        today = dj_timezone.now().date()
-        month_ago = today - timedelta(days=30)
+        pairs = list(ClanMembership.objects.values_list("clan_id", "user_id"))
+        users_by_clan = defaultdict(list)
+        for clan_id, user_id in pairs:
+            users_by_clan[clan_id].append(user_id)
 
-        clans = Clan.objects.annotate(members_count_annotated=Count("memberships"))
+        stats = get_users_playtime({uid for _, uid in pairs})
+
+        clans = Clan.objects.filter(id__in=users_by_clan.keys()).annotate(
+            members_count_annotated=Count("memberships")
+        )
+
         result = []
-
         for clan in clans:
-            user_ids = list(
-                ClanMembership.objects.filter(clan=clan).values_list("user_id", flat=True)
-            )
-            if not user_ids:
-                continue
-
-            activity = _period_activity(user_ids, month_ago, today)
-            total_minutes = int(sum(activity.values()))
-
-            logo_url = None
-            if clan.logo:
-                try:
-                    logo_url = clan.logo.url
-                except ValueError:
-                    logo_url = None
-
+            two_weeks = sum(stats.get(u, {}).get("two_weeks", 0) for u in users_by_clan[clan.id])
+            total = sum(stats.get(u, {}).get("total", 0) for u in users_by_clan[clan.id])
             result.append({
                 "id": clan.id,
                 "name": clan.name,
                 "logo": clan_logo_url(clan, request),
                 "members_count": clan.members_count_annotated,
-                "total_month_minutes": total_minutes,
+                "total_two_weeks_minutes": two_weeks,
+                "total_minutes": total,
             })
 
-        result.sort(key=lambda c: c["total_month_minutes"], reverse=True)
+        result.sort(key=lambda c: (c["total_two_weeks_minutes"], c["total_minutes"]), reverse=True)
         return Response(result[:15])
 
 class MyClansPanelView(APIView):

@@ -1,116 +1,74 @@
-from datetime import timedelta,date 
-from django.utils import timezone
-from django.db.models import Q,Sum
-from django.db import models
-from django.utils import timezone as dj_timezone
-from collections import defaultdict
+from django.db.models import OuterRef, Subquery
 
-from .models import ClanMembership,Clan
 from apps.profiles.models import DailySnapshot
-
-
-# apps/clans/services.py
-from collections import defaultdict
-from datetime import timedelta
-from django.utils import timezone as dj_timezone
 from .models import Clan, ClanMembership
-from apps.profiles.models import DailySnapshot
 
 
-def _period_activity(user_ids, start_date, end_date):
+def get_users_playtime(user_ids):
     """
-    Минуты, наигранные в [start_date, end_date] по дельте playtime_forever.
-    user_ids: iterable of user id
+    {user_id: {"two_weeks": минуты, "total": минуты}}
+    Берём последний снапшот каждой игры у Steam-аккаунтов пользователей.
     """
-    from collections import defaultdict
-    from apps.profiles.models import DailySnapshot
-
+    user_ids = list(user_ids)
     if not user_ids:
         return {}
 
-    snapshots = (
+    newest_date = (
         DailySnapshot.objects
-        .filter(game_account__user_id__in=user_ids, date__lte=end_date)
-        .select_related("game_account")
-        .order_by("date")
+        .filter(game_account=OuterRef("game_account"), appid=OuterRef("appid"))
+        .order_by("-date")
+        .values("date")[:1]
+    )
+    rows = (
+        DailySnapshot.objects
+        .filter(
+            game_account__user_id__in=user_ids,
+            game_account__platform="steam",
+            date=Subquery(newest_date),
+        )
+        .values_list("game_account__user_id", "appid", "playtime_forever", "playtime_2weeks")
     )
 
-    # (user_id, appid) -> list[(date, playtime_forever)]
-    series = defaultdict(list)
-    for s in snapshots:
-        series[(s.game_account.user_id, s.appid)].append(
-            (s.date, int(s.playtime_forever or 0))
-        )
-
-    result = defaultdict(int)
-
-    for (user_id, appid), pts in series.items():
-        if not pts:
-            continue
-
-        # последний снимок в периоде (date <= end_date, date >= start_date предпочтительно)
-        in_period = [(d, v) for d, v in pts if start_date <= d <= end_date]
-        before = [(d, v) for d, v in pts if d < start_date]
-
-        if not in_period:
-            continue
-
-        latest_val = in_period[-1][1]
-
-        if before:
-            base_val = before[-1][1]  # последний снимок ДО периода
+    # (user, appid) -> максимум, чтобы дубли Steam-аккаунтов не задвоили часы
+    best = {}
+    for uid, appid, forever, two_weeks in rows:
+        cur = best.get((uid, appid))
+        forever = forever or 0
+        two_weeks = two_weeks or 0
+        if cur is None:
+            best[(uid, appid)] = [forever, two_weeks]
         else:
-            # нет истории до периода → берём первый снимок внутри периода
-            # дельта только если есть 2+ точки внутри периода
-            if len(in_period) >= 2:
-                base_val = in_period[0][1]
-            else:
-                # один снимок и нет baseline — НЕ считаем весь forever за "сегодня/неделю"
-                continue
+            cur[0] = max(cur[0], forever)
+            cur[1] = max(cur[1], two_weeks)
 
-        delta = latest_val - base_val
-        if delta > 0:
-            result[user_id] += delta
+    result = {}
+    for (uid, _appid), (forever, two_weeks) in best.items():
+        r = result.setdefault(uid, {"two_weeks": 0, "total": 0})
+        r["two_weeks"] += two_weeks
+        r["total"] += forever
+    return result
 
-    return dict(result)
 
 def get_clan_dashboard(clan: Clan):
-    today = dj_timezone.now().date()
-    week_ago = today - timedelta(days=7)
-    month_ago = today - timedelta(days=30)
-
     memberships = list(ClanMembership.objects.filter(clan=clan).select_related("user"))
-    user_ids = [m.user_id for m in memberships]
-
-    today_activity = _period_activity(user_ids, today, today)
-    week_activity = _period_activity(user_ids, week_ago, today)
-    month_activity = _period_activity(user_ids, month_ago, today)
-
-    last_active_by_user = {}
-    for s in DailySnapshot.objects.filter(game_account__user_id__in=user_ids).select_related('game_account'):
-        uid = s.game_account.user_id
-        if uid not in last_active_by_user or s.date > last_active_by_user[uid]:
-            last_active_by_user[uid] = s.date
+    stats = get_users_playtime([m.user_id for m in memberships])
 
     result = []
-    for membership in memberships:
-        user = membership.user
-        last_active_date = last_active_by_user.get(user.id)
+    for m in memberships:
+        s = stats.get(m.user_id, {"two_weeks": 0, "total": 0})
         result.append({
-            "user_id": user.id,
-            "username": user.username,
-            "role": membership.role,
-            "joined_at": membership.joined_at,
-            "today_playtime": today_activity.get(user.id, 0),
-            "week_playtime": week_activity.get(user.id, 0),
-            "month_playtime": month_activity.get(user.id, 0),
-            "last_active_date": last_active_date,
-            "is_inactive": last_active_date is None or last_active_date < week_ago,
+            "user_id": m.user_id,
+            "username": m.user.username,
+            "role": m.role,
+            "joined_at": m.joined_at,
+            "two_weeks_playtime": s["two_weeks"],
+            "total_playtime": s["total"],
+            "is_inactive": s["two_weeks"] == 0,
         })
 
-    result.sort(key=lambda x: (x["last_active_date"] is None,
-                                 -(x["last_active_date"].toordinal() if x["last_active_date"] else 0)))
+    result.sort(key=lambda x: (-x["two_weeks_playtime"], -x["total_playtime"]))
     return result
+
 
 def join_clan_by_invite_code(user, invite_code: str) -> ClanMembership:
     try:

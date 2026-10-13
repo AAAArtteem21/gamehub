@@ -1,4 +1,4 @@
-<!-- src/components/clans/ClanDashboardTable.vue — полная новая версия -->
+<!-- src/components/clans/ClanDashboardTable.vue -->
 <script setup>
 import { ref } from 'vue'
 import api from '../../api/axios'
@@ -8,11 +8,10 @@ const emit = defineEmits(['updated'])
 
 const busyUserId = ref(null)
 
-function formatMinutes(min) {
-  if (!min) return '0м'
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return h > 0 ? `${h}ч ${m}м` : `${m}м`
+function formatHours(min) {
+  if (!min) return '0ч'
+  const h = min / 60
+  return h >= 10 ? `${Math.round(h)}ч` : `${(Math.round(h * 10) / 10).toFixed(1)}ч`
 }
 
 async function changeRole(userId, role) {
@@ -48,9 +47,8 @@ async function kick(userId, username) {
         <tr>
           <th>Участник</th>
           <th>Роль</th>
-          <th>Сегодня</th>
-          <th>За неделю</th>
-          <th>За месяц</th>
+          <th>За 2 недели</th>
+          <th>Всего</th>
           <th>Активность</th>
           <th v-if="isLeader">Управление</th>
         </tr>
@@ -61,9 +59,8 @@ async function kick(userId, username) {
             <RouterLink :to="`/players/${e.user_id}`" class="username-link">{{ e.username }}</RouterLink>
           </td>
           <td><span class="role-badge" :class="e.role">{{ e.role }}</span></td>
-          <td>{{ formatMinutes(e.today_playtime) }}</td>
-          <td>{{ formatMinutes(e.week_playtime) }}</td>
-          <td>{{ formatMinutes(e.month_playtime) }}</td>
+          <td class="num">{{ formatHours(e.two_weeks_playtime) }}</td>
+          <td class="num">{{ formatHours(e.total_playtime) }}</td>
           <td>
             <span v-if="e.is_inactive" class="inactive-tag">неактивен</span>
             <span v-else class="active-tag">● активен</span>
@@ -98,6 +95,7 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 10px 12px; color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border-color); font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
 td { padding: 12px; border-bottom: 1px solid var(--border-color); }
 tr.inactive { opacity: 0.5; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 
 .username-link { font-weight: 600; color: var(--text-primary); text-decoration: none; }
 .username-link:hover { color: var(--accent); text-decoration: underline; }
