@@ -24,10 +24,10 @@ watch(() => route.fullPath, closeSidebar)
 
 <template>
   <div class="layout" :class="{ 'sidebar-open': sidebarOpen }">
+    <TopBar />
     <div class="sidebar-backdrop" v-if="sidebarOpen" @click="closeSidebar" />
     <Sidebar />
     <div class="main">
-      <TopBar />
       <div class="content">
         <RouterView v-slot="{ Component }">
           <transition name="page" mode="out-in">
@@ -42,14 +42,13 @@ watch(() => route.fullPath, closeSidebar)
 
 <style scoped>
 .layout {
-  display: flex;
   min-height: 100vh;
 }
 .main {
   margin-left: var(--sidebar-w);
+  padding-top: var(--topbar-h);
   width: calc(100% - var(--sidebar-w));
   min-width: 0;
-  flex: 1;
 }
 .content {
   padding: 20px 24px 40px;
