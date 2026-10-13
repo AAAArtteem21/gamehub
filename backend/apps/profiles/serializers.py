@@ -25,13 +25,14 @@ class DailySnapshotSerializer(serializers.ModelSerializer):
 class GameAccountSerializer(serializers.ModelSerializer):
     snapshots = serializers.SerializerMethodField()
     display_stats = serializers.SerializerMethodField()
+    summary = serializers.SerializerMethodField()
 
     class Meta:
         model = GameAccount
         fields = [
             'id', 'user', 'platform', 'external_id', 'nickname', 'avatar',
             'verified', 'created_at', 'snapshots', 'extra_stats',
-            'skill_rating', 'game_label', 'display_stats',
+            'skill_rating', 'game_label', 'display_stats','summary',
         ]
         read_only_fields = ['user', 'verified', 'created_at', 'extra_stats', 'skill_rating', 'game_label']
 
@@ -69,3 +70,12 @@ class GameAccountSerializer(serializers.ModelSerializer):
     def create(self,validated_data):
         validated_data['user'] = self.context['request'].user 
         return super().create(validated_data)
+
+    def get_summary(self, obj):
+        if obj.platform != 'steam':
+            return None
+        from .serivces import get_account_summary
+        try:
+            return get_account_summary(obj)
+        except Exception:
+            return None
