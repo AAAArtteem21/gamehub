@@ -1586,34 +1586,21 @@ def get_steam_library(game_account: GameAccount):
     result.sort(key=lambda x: x["hours_total"], reverse=True)
     return result
 
-def get_account_summary(game_account: GameAccount):
-    if game_account.platform == "steam":
-        library = get_steam_library(game_account)
-        total_hours = sum(g["hours_total"] for g in library)
-        most = library[0]["name"] if library else None
-        return {
-            "total_playtime": int(total_hours * 60),  # минуты, как раньше
-            "most_played_game": most,
-            "games_count": len(library),
-            "library": library,
-        }
+def get_account_summary(account):
+    if account.platform != "steam":
+        return None
 
-    snapshots = game_account.snapshots.all()
-    if not snapshots:
-        return {"total_playtime": 0, "most_played_game": None, "games_count": 0, "library": []}
+    library = get_steam_library(account)  # hours_week / hours_month уже внутри
 
-    # для не-steam — latest per appid
-    latest = {}
-    for s in snapshots.order_by("-date"):
-        if s.appid not in latest:
-            latest[s.appid] = s
-    total = sum(s.playtime_forever for s in latest.values())
-    most_played = max(latest.values(), key=lambda s: s.playtime_forever) if latest else None
+    total_minutes = 0
+    for g in library:
+        total_minutes += int(round((g.get("hours_total") or 0) * 60))
+
     return {
-        "total_playtime": total,
-        "most_played_game": most_played.game_name if most_played else None,
-        "games_count": len(latest),
-        "library": [],
+        "total_playtime": total_minutes,
+        "most_played_game": library[0]["name"] if library else None,
+        "games_count": len(library),
+        "library": library,
     }
 
 
