@@ -42,14 +42,44 @@ const platformLabels = {
 const statsAccounts = computed(() =>
   accounts.value.filter(
     (a) =>
-      ['opendota', 'faceit', 'deadlock', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(a.platform) ||
-      (a.platform === 'steam' && a.display_stats)
+      ['opendota', 'faceit', 'deadlock', 'lol', 'valorant', 'fortnite', 'pubg', 'roblox'].includes(
+        a.platform
+      ) || (a.platform === 'steam' && a.display_stats)
   )
 )
 
 const activeAccount = computed(
   () => statsAccounts.value.find((a) => a.id === activeStatsTab.value) || statsAccounts.value[0]
 )
+
+/** Библиотека Steam: сначала summary.library с API, иначе расчёт из snapshots */
+const steamLibraryRows = computed(() => {
+  const steam = accounts.value.find((a) => a.platform === 'steam')
+  const lib = steam?.summary?.library
+  if (Array.isArray(lib) && lib.length) {
+    return lib.map((g) => ({
+      appid: g.appid,
+      game_name: g.name,
+      playtime_forever: Math.round((Number(g.hours_total) || 0) * 60),
+      week_minutes:
+        g.hours_week != null && g.hours_week !== ''
+          ? Math.round(Number(g.hours_week) * 60)
+          : null,
+      month_minutes:
+        g.hours_month != null && g.hours_month !== ''
+          ? Math.round(Number(g.hours_month) * 60)
+          : null,
+    }))
+  }
+  return steamGamesFlat()
+})
+
+function fmtHoursFromMinutes(mins) {
+  if (mins == null) return null
+  const h = mins / 60
+  if (h >= 10) return Math.round(h).toString()
+  return (Math.round(h * 10) / 10).toFixed(1)
+}
 
 async function loadProgress() {
   try {
@@ -87,11 +117,8 @@ function onAccountCreated(payload) {
   showConnectModal.value = false
 
   if (linked.length) {
-    const names = linked
-      .map((l) => platformLabels[l.platform] || l.platform)
-      .join(', ')
+    const names = linked.map((l) => platformLabels[l.platform] || l.platform).join(', ')
     toast.success(`По Steam также подключили: ${names}`)
-    // фоновые синки: подтягиваем список через 4с и через 14с
     setTimeout(loadAccounts, 4000)
     setTimeout(loadAccounts, 14000)
   }
@@ -102,7 +129,6 @@ function onAccountCreated(payload) {
     loadAccounts()
   }
 }
-
 
 function copyRefCode() {
   const code = progress.value?.referral_code
@@ -202,8 +228,7 @@ function openMatch(matchId) {
   } else if (p === 'faceit') {
     openMatchGame.value = 'faceit'
     openMatchId.value = matchId
-  }
-  else if (p === 'deadlock') {
+  } else if (p === 'deadlock') {
     openMatchGame.value = 'deadlock'
     openMatchId.value = matchId
   }
@@ -214,6 +239,7 @@ function closeMatch() {
   openMatchGame.value = null
 }
 
+/** Fallback: неделя/месяц из DailySnapshot на клиенте */
 function steamGamesFlat() {
   const map = {}
   for (const acc of accounts.value) {
@@ -222,55 +248,47 @@ function steamGamesFlat() {
       const day = String(s.date).slice(0, 10)
       if (!map[s.appid]) map[s.appid] = { name: s.game_name, byDate: {} }
       map[s.appid].byDate[day] = Number(s.playtime_forever) || 0
-      if (!map[s.appid].latestDate || day > map[s.appid].latestDate) {
-        map[s.appid].latestDate = day
-        map[s.appid].name = s.game_name || map[s.appid].name
-        map[s.appid].latestMinutes = Number(s.playtime_forever) || 0
-      }
+      if (!map[s.appid].name) map[s.appid].name = s.game_name
     }
   }
 
   const pad = (n) => String(n).padStart(2, '0')
-  const isoLocal = (d) =>
+  const iso = (d) =>
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
-  const today = new Date()
-  const weekAgo = new Date(today)
-  weekAgo.setDate(weekAgo.getDate() - 7)
-  const monthAgo = new Date(today)
-  monthAgo.setDate(monthAgo.getDate() - 30)
+  const now = new Date()
+  const weekAgo = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7))
+  const monthAgo = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30))
 
-  function deltaSince(byDate, sinceDate) {
+  function baseline(byDate, targetIso) {
+    let best = null
+    for (const d of Object.keys(byDate).sort()) {
+      if (d <= targetIso) best = byDate[d]
+    }
+    return best
+  }
+
+  function deltaMin(byDate, targetIso) {
     const dates = Object.keys(byDate).sort()
     if (dates.length < 2) return null
-
-    const since = isoLocal(sinceDate)
-    const latest = dates[dates.length - 1]
-    const latestVal = byDate[latest] || 0
-
-    let baseVal = null
-    for (const d of dates) {
-      if (d < since) baseVal = byDate[d]
-    }
-
-    if (baseVal == null) {
-      const inWindow = dates.filter((d) => d >= since)
-      if (inWindow.length < 2) return null
-      baseVal = byDate[inWindow[0]]
-    }
-
-    const delta = latestVal - baseVal
-    return delta > 0 ? delta : 0
+    const latestVal = byDate[dates[dates.length - 1]] || 0
+    const baseVal = baseline(byDate, targetIso)
+    if (baseVal == null) return null
+    return Math.max(latestVal - baseVal, 0)
   }
 
   return Object.entries(map)
-    .map(([appid, g]) => ({
-      appid: Number(appid),
-      game_name: g.name,
-      playtime_forever: g.latestMinutes || 0,
-      week_minutes: deltaSince(g.byDate, weekAgo),
-      month_minutes: deltaSince(g.byDate, monthAgo),
-    }))
+    .map(([appid, g]) => {
+      const dates = Object.keys(g.byDate).sort()
+      const latestVal = dates.length ? g.byDate[dates[dates.length - 1]] : 0
+      return {
+        appid: Number(appid),
+        game_name: g.name,
+        playtime_forever: latestVal,
+        week_minutes: deltaMin(g.byDate, weekAgo),
+        month_minutes: deltaMin(g.byDate, monthAgo),
+      }
+    })
     .sort((a, b) => b.playtime_forever - a.playtime_forever)
 }
 
@@ -396,7 +414,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="card games-table-card" v-if="steamGamesFlat().length">
+      <div class="card games-table-card" v-if="steamLibraryRows.length">
         <h3 class="card-title table-title">Библиотека Steam — все игры</h3>
         <table class="games-table">
           <thead>
@@ -408,26 +426,32 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in steamGamesFlat()" :key="row.appid">
+            <tr v-for="row in steamLibraryRows" :key="row.appid">
               <td class="game-cell">{{ row.game_name }}</td>
               <td class="hours-cell">
                 {{ Math.round(row.playtime_forever / 60) }}ч
               </td>
               <td class="today-cell">
-                <span v-if="row.week_minutes != null && row.week_minutes > 0">
-                  +{{ Math.round(row.week_minutes / 60) }}ч
-                </span>
-                <span v-else class="muted" title="Нужно минимум 2 дня синка Steam"
-                  >—</span
-                >
+                <template v-if="row.week_minutes != null">
+                  <span v-if="row.week_minutes > 0">+{{ fmtHoursFromMinutes(row.week_minutes) }}ч</span>
+                  <span v-else class="muted">0ч</span>
+                </template>
+                <span
+                  v-else
+                  class="muted"
+                  title="Нужно минимум 2 дня синка Steam"
+                >—</span>
               </td>
               <td class="today-cell">
-                <span v-if="row.month_minutes != null && row.month_minutes > 0">
-                  +{{ Math.round(row.month_minutes / 60) }}ч
-                </span>
-                <span v-else class="muted" title="Нужно минимум 2 дня синка Steam"
-                  >—</span
-                >
+                <template v-if="row.month_minutes != null">
+                  <span v-if="row.month_minutes > 0">+{{ fmtHoursFromMinutes(row.month_minutes) }}ч</span>
+                  <span v-else class="muted">0ч</span>
+                </template>
+                <span
+                  v-else
+                  class="muted"
+                  title="Нужно минимум 2 дня синка Steam"
+                >—</span>
               </td>
             </tr>
           </tbody>
@@ -455,6 +479,12 @@ onMounted(() => {
     <MatchParticipantsModal
       v-if="openMatchId && openMatchGame === 'faceit'"
       game="faceit"
+      :match-id="openMatchId"
+      @close="closeMatch"
+    />
+    <MatchParticipantsModal
+      v-if="openMatchId && openMatchGame === 'deadlock'"
+      game="deadlock"
       :match-id="openMatchId"
       @close="closeMatch"
     />
@@ -597,7 +627,9 @@ onMounted(() => {
   font-weight: 600;
   cursor: pointer;
 }
-.btn-ref:disabled { opacity: 0.5; }
+.btn-ref:disabled {
+  opacity: 0.5;
+}
 
 .section-header {
   display: flex;
@@ -628,7 +660,10 @@ onMounted(() => {
   border-radius: var(--radius-sm);
   padding: 6px 10px;
 }
-.platform-label { font-weight: 600; font-size: 12px; }
+.platform-label {
+  font-weight: 600;
+  font-size: 12px;
+}
 .chip-nick {
   font-size: 11px;
   color: var(--text-secondary);
@@ -659,7 +694,9 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
 }
-.icon-btn:disabled { opacity: 0.5; }
+.icon-btn:disabled {
+  opacity: 0.5;
+}
 .icon-btn.danger:hover:not(:disabled) {
   color: var(--danger);
   border-color: var(--danger);
@@ -713,7 +750,9 @@ onMounted(() => {
   letter-spacing: 0.04em;
   color: var(--text-secondary);
 }
-.table-title { padding: 14px 16px 0; }
+.table-title {
+  padding: 14px 16px 0;
+}
 .games-table-card {
   padding: 0 !important;
   overflow: hidden;
@@ -738,9 +777,15 @@ onMounted(() => {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-color);
 }
-.games-table tr:last-child td { border-bottom: none; }
-.games-table tbody tr:hover { background: var(--bg-card-hover); }
-.game-cell { font-weight: 500; }
+.games-table tr:last-child td {
+  border-bottom: none;
+}
+.games-table tbody tr:hover {
+  background: var(--bg-card-hover);
+}
+.game-cell {
+  font-weight: 500;
+}
 .hours-cell {
   font-weight: 600;
   font-family: var(--font-mono);
@@ -751,7 +796,9 @@ onMounted(() => {
   font-size: 12px;
   font-family: var(--font-mono);
 }
-.muted { color: var(--text-muted); }
+.muted {
+  color: var(--text-muted);
+}
 
 .state-message {
   padding: 48px 20px;
@@ -767,13 +814,31 @@ onMounted(() => {
   align-items: center;
   gap: 14px;
 }
-.error-state { color: var(--danger); }
+.error-state {
+  color: var(--danger);
+}
+
 @media (max-width: 900px) {
-  .profile-header { flex-direction: column; align-items: stretch; }
-  .avatar-big { width: 56px; height: 56px; }
-  .section-header { flex-direction: column; align-items: stretch; }
-  .games-table-card { overflow-x: auto; }
-  .games-table { min-width: 480px; }
-  .gh-bar { max-width: none; }
+  .profile-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .avatar-big {
+    width: 56px;
+    height: 56px;
+  }
+  .section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .games-table-card {
+    overflow-x: auto;
+  }
+  .games-table {
+    min-width: 480px;
+  }
+  .gh-bar {
+    max-width: none;
+  }
 }
 </style>

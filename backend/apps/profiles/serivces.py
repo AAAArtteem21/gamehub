@@ -1519,41 +1519,68 @@ def get_daily_playtime(game_account: GameAccount, appid: int, target_date: date)
     return max(today_snap.playtime_forever - yesterday_snap.playtime_forever, 0)
 
 def get_steam_library(game_account: GameAccount):
-    """Один ряд на appid: часы всего + часы сегодня (дельта с вчера)."""
+    """
+    Один ряд на appid:
+      hours_total  — всего
+      hours_today  — дельта с вчера (если есть оба дня)
+      hours_week   — дельта ~7 дней
+      hours_month  — дельта ~30 дней
+    Без второй точки по времени поле = None → на UI «—».
+    """
     today = date.today()
-    yesterday = today - timedelta(days=1)
+    week_ago = today - timedelta(days=7)
+    month_ago = today - timedelta(days=30)
 
     snaps = list(
         DailySnapshot.objects
         .filter(game_account=game_account)
-        .order_by("appid", "-date")
+        .order_by("appid", "date")
     )
 
-    latest_by_app = {}
-    by_app_date = {}
+    by_app = {}
     for s in snaps:
-        by_app_date[(s.appid, s.date)] = s
-        if s.appid not in latest_by_app:
-            latest_by_app[s.appid] = s
+        by_app.setdefault(s.appid, []).append(s)
+
+    def _baseline(points, target):
+        """Ближайший снапшот с date <= target (points по возрастанию date)."""
+        best = None
+        for s in points:
+            if s.date <= target:
+                best = s
+            else:
+                break
+        return best
+
+    def _delta_hours(latest, base):
+        if latest is None or base is None:
+            return None
+        if base.date >= latest.date:
+            return None
+        return round(
+            max((latest.playtime_forever or 0) - (base.playtime_forever or 0), 0) / 60,
+            1,
+        )
 
     result = []
-    for appid, latest in latest_by_app.items():
+    for appid, points in by_app.items():
+        latest = points[-1]
         hours_total = round((latest.playtime_forever or 0) / 60, 1)
 
-        today_s = by_app_date.get((appid, today))
-        yest_s = by_app_date.get((appid, yesterday))
-        hours_today = None
-        if today_s and yest_s:
-            hours_today = round(
-                max((today_s.playtime_forever or 0) - (yest_s.playtime_forever or 0), 0) / 60,
-                1,
-            )
+        yest = _baseline(points, today - timedelta(days=1))
+        week_b = _baseline(points, week_ago)
+        month_b = _baseline(points, month_ago)
+
+        # «сегодня»: если есть сегодняшний снап и вчерашний
+        today_s = points[-1] if points[-1].date == today else None
+        hours_today = _delta_hours(today_s, yest) if today_s else None
 
         result.append({
             "appid": appid,
-            "name": latest.game_name,
+            "name": latest.game_name or str(appid),
             "hours_total": hours_total,
-            "hours_today": hours_today,  # None → на UI "—"
+            "hours_today": hours_today,
+            "hours_week": _delta_hours(latest, week_b),
+            "hours_month": _delta_hours(latest, month_b),
         })
 
     result.sort(key=lambda x: x["hours_total"], reverse=True)
