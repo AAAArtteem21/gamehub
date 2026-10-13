@@ -90,12 +90,10 @@ async function loadSocialBlocks() {
   }
 }
 
-function formatMinutes(min) {
-  if (!min) return '0м'
-  if (min < 60) return `${min}м`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m ? `${h}ч ${m}м` : `${h}ч`
+function formatHours(min) {
+  if (!min) return '0ч'
+  const h = min / 60
+  return h >= 10 ? `${Math.round(h)}ч` : `${(Math.round(h * 10) / 10).toFixed(1)}ч`
 }
 
 function leaderboardTo(entry) {
@@ -204,7 +202,7 @@ onMounted(() => {
 
         <div class="card section-card">
           <div class="section-head">
-            <h3>Топ кланов за месяц</h3>
+            <h3>Топ кланов за 2 недели</h3>
             <RouterLink to="/clans" class="link-all">Все →</RouterLink>
           </div>
           <div v-if="clanLeaderboardLoading" class="empty-hint">Загрузка...</div>
@@ -221,9 +219,11 @@ onMounted(() => {
             <ClanIcon :clan="c" :size="32" />
             <div class="clan-lb-info">
               <span class="clan-lb-name">{{ c.name }}</span>
-              <span class="clan-lb-sub">{{ c.members_count }} участников</span>
+              <span class="clan-lb-sub">
+                {{ c.members_count }} участников · {{ formatHours(c.total_minutes) }} всего
+              </span>
             </div>
-            <span class="clan-lb-val">{{ formatMinutes(c.total_month_minutes) }}</span>
+            <span class="clan-lb-val">{{ formatHours(c.total_two_weeks_minutes) }}</span>
           </div>
         </div>
       </div>
