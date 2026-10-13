@@ -424,3 +424,58 @@ select:focus {
     font-size: 12px;
   }
 }
+
+:root {
+  --topbar-h: 64px;
+  --glow: color-mix(in srgb, var(--accent) 38%, transparent);
+  --glow-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --panel-bg: linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-card) 90%, var(--accent) 10%),
+      var(--bg-card));
+  --panel-border: color-mix(in srgb, var(--accent) 24%, var(--border-color));
+}
+
+body {
+  background:
+    radial-gradient(ellipse 900px 500px at 10% -5%, var(--glow-soft), transparent),
+    radial-gradient(ellipse 700px 400px at 100% 0%, var(--glow-soft), transparent),
+    var(--bg-primary);
+  background-attachment: fixed;
+}
+
+/* единый вид панелей на всех страницах */
+.card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px -14px var(--glow-soft);
+}
+
+.card+.card {
+  border-top: 1px solid var(--panel-border);
+}
+
+.card:hover {
+  border-color: var(--panel-border);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  border-color: var(--accent);
+  box-shadow: 0 0 18px var(--glow-soft);
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 22px var(--glow);
+}
+
+.btn-secondary,
+.btn-ghost {
+  border-color: var(--panel-border);
+}
+
+.btn-secondary:hover:not(:disabled),
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 14px var(--glow-soft);
+}

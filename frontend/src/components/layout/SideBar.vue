@@ -1,7 +1,6 @@
 <script setup>
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ref, onMounted, computed, watch, inject } from 'vue'
-import logo from '../../assets/images/logo.png'
 import api from '../../api/axios'
 import IconHome from '../icons/IconHome.vue'
 import IconSword from '../icons/IconSword.vue'
@@ -164,14 +163,6 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 
 <template>
   <aside class="sidebar" :class="{ open: sidebarOpen }">
-    <div class="logo">
-      <img :src="logo" alt="GameEyes" class="logo-mark" />
-      <div class="logo-text-group">
-        <span class="logo-text">GAME<span class="accent-text">EYES</span></span>
-        <span class="logo-tagline">find · play · win</span>
-      </div>
-    </div>
-
     <nav class="nav">
       <RouterLink
         v-for="item in navItems"
@@ -191,7 +182,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
       <div class="week-games" v-if="(weekly.available_games || []).length">
         <button
           type="button"
-          class="week-game-btn"
+          class="pill-btn"
           :class="{ active: weeklyGame === 'all' }"
           @click="setWeeklyGame('all')"
         >Все</button>
@@ -199,7 +190,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
           v-for="g in weekly.available_games"
           :key="g.value"
           type="button"
-          class="week-game-btn"
+          class="pill-btn"
           :class="{ active: weeklyGame === g.value }"
           @click="setWeeklyGame(g.value)"
         >{{ g.label }}</button>
@@ -208,7 +199,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
         <div
           class="week-ring"
           :style="{
-            background: `conic-gradient(var(--success) 0 ${winPct}%, rgba(201,122,114,0.25) ${winPct}% 100%)`,
+            background: `conic-gradient(var(--accent) 0 ${winPct}%, var(--bg-sunken) ${winPct}% 100%)`,
           }"
         >
           <div class="week-ring-inner">{{ winPct }}%</div>
@@ -234,9 +225,12 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
     </div>
 
     <div class="sidebar-widget" v-if="auth.isAuthenticated">
-      <span class="widget-title">Избранные</span>
+      <div class="widget-head">
+        <span class="widget-title">Избранные</span>
+        <span class="widget-star">★</span>
+      </div>
       <div v-if="!favorites.length" class="fav-empty">
-        На профиле нажми «☆ В избранное»
+        На профиле нажми «★ в избранное»
       </div>
       <button
         v-for="(u, i) in favorites.slice(0, 5)"
@@ -262,7 +256,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
           v-for="(c, i) in clanPanels"
           :key="c.clan_id"
           type="button"
-          class="clan-tab"
+          class="pill-btn"
           :class="{ active: activeClanIdx === i }"
           @click="activeClanIdx = i"
         >
@@ -331,111 +325,84 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 <style scoped>
 .sidebar {
   width: var(--sidebar-w);
-  height: 100vh;
+  height: calc(100vh - var(--topbar-h));
   position: fixed;
   left: 0;
-  top: 0;
-  background: var(--bg-sunken);
-  border-right: 1px solid var(--border-color);
-  padding: 14px 10px;
+  top: var(--topbar-h);
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   overflow-y: auto;
   box-sizing: border-box;
   z-index: 40;
 }
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 2px;
-  flex-shrink: 0;
-}
-.logo-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-.logo-text-group {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-  min-width: 0;
-}
-.logo-text {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-.accent-text { color: var(--accent); }
-.logo-tagline {
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  font-weight: 500;
-  text-transform: lowercase;
-}
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-shrink: 0;
-}
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
-  border-left: 2px solid transparent;
-}
-.nav-item:hover {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  text-decoration: none;
-}
-.nav-item.active {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  border-left-color: var(--accent);
-}
-.nav-icon {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.8;
-}
-.nav-icon svg { width: 16px; height: 16px; }
 
-.sidebar-widget {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 10px;
+.nav {
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
-  background: transparent;
+  padding: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+.nav-item:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+.nav-item.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text-primary);
+  box-shadow: 0 0 16px var(--glow-soft), inset 0 0 12px var(--glow-soft);
+}
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.nav-icon :deep(svg) { width: 18px; height: 18px; }
+
+.sidebar-widget {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .foot-widget { margin-top: auto; }
+.widget-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.widget-star { color: var(--accent); font-size: 14px; }
 .widget-title {
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--accent);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-weight: 700;
 }
 .widget-row {
   display: flex;
@@ -455,26 +422,27 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 .week-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 .week-ring {
-  width: 42px;
-  height: 42px;
+  width: 54px;
+  height: 54px;
   border-radius: 50%;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 14px var(--glow-soft);
 }
 .week-ring-inner {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background: var(--bg-primary);
+  background: var(--bg-card);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
 }
@@ -496,22 +464,23 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 }
 .period { font-size: 11px; color: var(--text-muted); }
 
-.week-games, .clan-tabs {
+.week-games,
+.clan-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
-.week-game-btn, .clan-tab {
+.pill-btn {
   font-size: 10px;
   font-weight: 600;
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  border-radius: 999px;
   border: 1px solid var(--border-color);
-  background: none;
+  background: var(--bg-sunken);
   color: var(--text-secondary);
   cursor: pointer;
 }
-.week-game-btn.active, .clan-tab.active {
+.pill-btn.active {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-dim);
@@ -533,13 +502,13 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   padding: 4px;
   cursor: pointer;
   text-align: left;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
 }
-.fav-item:hover { background: var(--bg-card); }
+.fav-item:hover { background: var(--bg-card-hover); }
 .fav-av {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   flex-shrink: 0;
   background: var(--accent-dim) center/cover no-repeat;
   display: flex;
@@ -581,19 +550,22 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   letter-spacing: 0.05em;
   margin-top: 2px;
 }
-.clan-feed, .clan-chat {
+.clan-feed,
+.clan-chat {
   max-height: 110px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.feed-line, .chat-line {
+.feed-line,
+.chat-line {
   font-size: 11px;
   line-height: 1.35;
   color: var(--text-secondary);
 }
-.feed-line b, .chat-line b {
+.feed-line b,
+.chat-line b {
   color: var(--text-primary);
   font-weight: 600;
 }
@@ -604,18 +576,9 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   border-radius: 3px;
   margin-right: 3px;
 }
-.chat-role.leader {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-.chat-role.officer {
-  background: var(--accent-2-dim);
-  color: var(--accent-2);
-}
-.chat-role.member {
-  background: var(--bg-card);
-  color: var(--text-muted);
-}
+.chat-role.leader { background: var(--accent-dim); color: var(--accent); }
+.chat-role.officer { background: var(--accent-2-dim); color: var(--accent-2); }
+.chat-role.member { background: var(--bg-card); color: var(--text-muted); }
 .chat-form {
   display: flex;
   gap: 4px;
@@ -630,18 +593,18 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 .chat-form button {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #12100c;
-  border-radius: var(--radius-sm);
+  color: #fff;
+  border-radius: 8px;
   padding: 0 10px;
   cursor: pointer;
   font-weight: 700;
 }
 .chat-form-btn {
   background: var(--accent);
-  color: #12100c;
+  color: #fff;
   border: none;
   padding: 8px;
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -653,6 +616,7 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
     transition: transform 0.2s var(--ease);
     z-index: 50;
     width: min(var(--sidebar-w), 86vw);
+    background: var(--bg-primary);
   }
   .sidebar.open {
     transform: translateX(0);
