@@ -1518,84 +1518,82 @@ def get_daily_playtime(game_account: GameAccount, appid: int, target_date: date)
         return None
     return max(today_snap.playtime_forever - yesterday_snap.playtime_forever, 0)
 
-def get_steam_library(game_account: GameAccount):
-    """
-    Один ряд на appid:
-      hours_total  — всего
-      hours_today  — дельта с вчера (если есть оба дня)
-      hours_week   — дельта ~7 дней
-      hours_month  — дельта ~30 дней
-    Без второй точки по времени поле = None → на UI «—».
-    """
-    today = date.today()
-    week_ago = today - timedelta(days=7)
-    month_ago = today - timedelta(days=30)
+def get_steam_library(game_account):
+    """Библиотека Steam: снапшоты со ВСЕХ steam-аккаунтов этого user
+    (чтобы дубли GameAccount не обнуляли неделю/месяц)."""
+    from datetime import timedelta
+    from django.utils import timezone as dj_timezone
+    from collections import defaultdict
+    from .models import GameAccount, DailySnapshot
 
-    snaps = list(
+    user_id = game_account.user_id
+    steam_ids = list(
+        GameAccount.objects.filter(user_id=user_id, platform="steam")
+        .values_list("id", flat=True)
+    )
+    if not steam_ids:
+        steam_ids = [game_account.id]
+
+    snaps = (
         DailySnapshot.objects
-        .filter(game_account=game_account)
+        .filter(game_account_id__in=steam_ids)
         .order_by("appid", "date")
     )
 
-    by_app = {}
+    by_app = defaultdict(list)  # appid -> [(date, minutes, name), ...]
     for s in snaps:
-        by_app.setdefault(s.appid, []).append(s)
+        by_app[s.appid].append(
+            (s.date, int(s.playtime_forever or 0), s.game_name or str(s.appid))
+        )
 
-    def _baseline(points, target):
-        """Ближайший снапшот с date <= target (points по возрастанию date)."""
+    today = dj_timezone.now().date()
+    week_ago = today - timedelta(days=7)
+    month_ago = today - timedelta(days=30)
+
+    def baseline(points, target_date):
+        """Последнее значение с date <= target_date."""
         best = None
-        for s in points:
-            if s.date <= target:
-                best = s
-            else:
-                break
+        for d, val, _ in points:
+            if d <= target_date:
+                best = val
         return best
 
-    def _delta_hours(latest, base):
-        if latest is None or base is None:
+    def hours_delta(points, target_date):
+        if len(points) < 2:
             return None
-        if base.date >= latest.date:
+        latest_val = points[-1][1]
+        base = baseline(points, target_date)
+        if base is None:
             return None
-        return round(
-            max((latest.playtime_forever or 0) - (base.playtime_forever or 0), 0) / 60,
-            1,
-        )
+        return round(max(latest_val - base, 0) / 60.0, 1)
 
     result = []
     for appid, points in by_app.items():
-        latest = points[-1]
-        hours_total = round((latest.playtime_forever or 0) / 60, 1)
-
-        yest = _baseline(points, today - timedelta(days=1))
-        week_b = _baseline(points, week_ago)
-        month_b = _baseline(points, month_ago)
-
-        # «сегодня»: если есть сегодняшний снап и вчерашний
-        today_s = points[-1] if points[-1].date == today else None
-        hours_today = _delta_hours(today_s, yest) if today_s else None
-
+        points = sorted(points, key=lambda x: x[0])
+        merged = {}
+        name = points[-1][2]
+        for d, val, n in points:
+            merged[d] = max(merged.get(d, 0), val)
+            name = n or name
+        pts = [(d, merged[d], name) for d in sorted(merged)]
+        latest = pts[-1][1]
         result.append({
             "appid": appid,
-            "name": latest.game_name or str(appid),
-            "hours_total": hours_total,
-            "hours_today": hours_today,
-            "hours_week": _delta_hours(latest, week_b),
-            "hours_month": _delta_hours(latest, month_b),
+            "name": name,
+            "hours_total": round(latest / 60.0, 1),
+            "hours_today": hours_delta(pts, today - timedelta(days=1)),
+            "hours_week": hours_delta(pts, week_ago),
+            "hours_month": hours_delta(pts, month_ago),
         })
 
-    result.sort(key=lambda x: x["hours_total"], reverse=True)
+    result.sort(key=lambda g: g["hours_total"], reverse=True)
     return result
 
 def get_account_summary(account):
     if account.platform != "steam":
         return None
-
-    library = get_steam_library(account)  # hours_week / hours_month уже внутри
-
-    total_minutes = 0
-    for g in library:
-        total_minutes += int(round((g.get("hours_total") or 0) * 60))
-
+    library = get_steam_library(account)
+    total_minutes = sum(int(round((g.get("hours_total") or 0) * 60)) for g in library)
     return {
         "total_playtime": total_minutes,
         "most_played_game": library[0]["name"] if library else None,

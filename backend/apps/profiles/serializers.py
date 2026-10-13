@@ -70,15 +70,16 @@ class GameAccountSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = self.context["request"].user
         platform = validated_data.get("platform")
+        external_id = validated_data.get("external_id")
+
         if platform == "steam":
             existing = GameAccount.objects.filter(user=user, platform="steam").first()
             if existing:
-                # не создаём второй — обновляем id при необходимости
-                new_ext = validated_data.get("external_id")
-                if new_ext and str(existing.external_id) != str(new_ext):
-                    existing.external_id = str(new_ext)
+                if external_id and str(existing.external_id) != str(external_id):
+                    existing.external_id = str(external_id)
                     existing.save(update_fields=["external_id"])
                 return existing
+
         validated_data["user"] = user
         return super().create(validated_data)
 
