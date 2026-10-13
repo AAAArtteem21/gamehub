@@ -58,6 +58,48 @@ class GameAccountViewSet(viewsets.ModelViewSet):
         
     def create(self, request, *args, **kwargs):
         platform = request.data.get("platform")
+        external_id = (request.data.get("external_id") or "").strip()
+
+        # Steam: никогда не создаём второй аккаунт — синкаем существующий
+        if platform == "steam":
+            existing = GameAccount.objects.filter(
+                user=request.user, platform="steam"
+            ).first()
+            if existing:
+                if external_id and str(existing.external_id) != external_id:
+                    existing.external_id = external_id
+                    existing.save(update_fields=["external_id"])
+                service = None
+                try:
+                    service = ProfileSyncService(existing)
+                    service.sync()
+                except SyncError as e:
+                    cache.delete(_list_cache_key(request.user.id))
+                    data = self.get_serializer(existing).data
+                    return Response(
+                        {**data, "account": data, "sync_error": str(e), "linked": []},
+                        status=status.HTTP_200_OK,
+                    )
+                except Exception:
+                    pass
+
+                cache.delete(_list_cache_key(request.user.id))
+                existing.refresh_from_db()
+                data = self.get_serializer(existing).data
+                linked = [
+                    {
+                        "platform": a.platform,
+                        "id": a.id,
+                        "status": "syncing",
+                        "nickname": a.nickname,
+                    }
+                    for a in (service.linked_accounts if service else [])
+                ]
+                return Response(
+                    {**data, "account": data, "linked": linked},
+                    status=status.HTTP_200_OK,
+                )
+
         existing_count = GameAccount.objects.filter(
             user=request.user, platform=platform
         ).count()
