@@ -18,5 +18,17 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; t
     --email "$DJANGO_SUPERUSER_EMAIL" 2>/dev/null || echo "Superuser already exists"
 fi
 
+echo "Steam snapshot (startup)..."
+python manage.py snapshot_steam || echo "snapshot_steam failed"
+
+# Фоновый цикл: снимок каждые 6 часов (update_or_create, дублей за день не будет)
+(
+  while true; do
+    sleep 21600
+    echo "Steam snapshot (loop)..."
+    python manage.py snapshot_steam || echo "snapshot_steam failed"
+  done
+) &
+
 echo "Starting server..."
 exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3
