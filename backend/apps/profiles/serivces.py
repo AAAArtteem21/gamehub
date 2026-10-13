@@ -938,7 +938,11 @@ class ProfileSyncService:
             for game in games:
                 DailySnapshot.objects.update_or_create(
                     game_account=self.account, appid=game["appid"], date=today,
-                    defaults={"game_name": game.get("name", "Unknown"), "playtime_forever": game.get("playtime_forever", 0)},
+                    defaults={
+                        "game_name": game.get("name", "Unknown"),
+                        "playtime_forever": game.get("playtime_forever", 0),
+                        "playtime_2weeks": game.get("playtime_2weeks", 0),  # Steam не шлёт ключ, если не играл 14 дней
+                    },
                 )
 
         has_cs2 = any(g["appid"] == 730 for g in games)
@@ -1519,73 +1523,40 @@ def get_daily_playtime(game_account: GameAccount, appid: int, target_date: date)
     return max(today_snap.playtime_forever - yesterday_snap.playtime_forever, 0)
 
 def get_steam_library(game_account):
-    """Библиотека Steam: снапшоты со ВСЕХ steam-аккаунтов этого user
-    (чтобы дубли GameAccount не обнуляли неделю/месяц)."""
-    from datetime import timedelta
-    from django.utils import timezone as dj_timezone
-    from collections import defaultdict
-    from .models import GameAccount, DailySnapshot
+    """Библиотека Steam: последний снапшот по каждой игре (со всех steam-аккаунтов юзера)."""
+    from django.db.models import OuterRef, Subquery
 
-    user_id = game_account.user_id
     steam_ids = list(
-        GameAccount.objects.filter(user_id=user_id, platform="steam")
+        GameAccount.objects.filter(user_id=game_account.user_id, platform="steam")
         .values_list("id", flat=True)
-    )
-    if not steam_ids:
-        steam_ids = [game_account.id]
+    ) or [game_account.id]
 
-    snaps = (
+    newest_date = (
         DailySnapshot.objects
-        .filter(game_account_id__in=steam_ids)
-        .order_by("appid", "date")
+        .filter(game_account_id__in=steam_ids, appid=OuterRef("appid"))
+        .order_by("-date")
+        .values("date")[:1]
+    )
+    snaps = DailySnapshot.objects.filter(
+        game_account_id__in=steam_ids, date=Subquery(newest_date)
     )
 
-    by_app = defaultdict(list)  # appid -> [(date, minutes, name), ...]
+    by_app = {}
     for s in snaps:
-        by_app[s.appid].append(
-            (s.date, int(s.playtime_forever or 0), s.game_name or str(s.appid))
-        )
+        cur = by_app.get(s.appid)
+        if cur is None or (s.playtime_forever or 0) > (cur.playtime_forever or 0):
+            by_app[s.appid] = s
 
-    today = dj_timezone.now().date()
-    week_ago = today - timedelta(days=7)
-    month_ago = today - timedelta(days=30)
-
-    def baseline(points, target_date):
-        """Последнее значение с date <= target_date."""
-        best = None
-        for d, val, _ in points:
-            if d <= target_date:
-                best = val
-        return best
-
-    def hours_delta(points, target_date):
-        if len(points) < 2:
-            return None
-        latest_val = points[-1][1]
-        base = baseline(points, target_date)
-        if base is None:
-            return None
-        return round(max(latest_val - base, 0) / 60.0, 1)
-
-    result = []
-    for appid, points in by_app.items():
-        points = sorted(points, key=lambda x: x[0])
-        merged = {}
-        name = points[-1][2]
-        for d, val, n in points:
-            merged[d] = max(merged.get(d, 0), val)
-            name = n or name
-        pts = [(d, merged[d], name) for d in sorted(merged)]
-        latest = pts[-1][1]
-        result.append({
+    result = [
+        {
             "appid": appid,
-            "name": name,
-            "hours_total": round(latest / 60.0, 1),
-            "hours_today": hours_delta(pts, today - timedelta(days=1)),
-            "hours_week": hours_delta(pts, week_ago),
-            "hours_month": hours_delta(pts, month_ago),
-        })
-
+            "name": s.game_name or str(appid),
+            "hours_total": round((s.playtime_forever or 0) / 60.0, 1),
+            # None только у старых снапшотов до миграции, после первого синка будет число
+            "hours_2weeks": None if s.playtime_2weeks is None else round(s.playtime_2weeks / 60.0, 1),
+        }
+        for appid, s in by_app.items()
+    ]
     result.sort(key=lambda g: g["hours_total"], reverse=True)
     return result
 

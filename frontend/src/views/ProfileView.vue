@@ -52,34 +52,18 @@ const activeAccount = computed(
   () => statsAccounts.value.find((a) => a.id === activeStatsTab.value) || statsAccounts.value[0]
 )
 
-/** Библиотека Steam: сначала summary.library с API, иначе расчёт из snapshots */
+/** Библиотека Steam: summary.library с API (hours_total + hours_2weeks) */
 const steamLibraryRows = computed(() => {
   const steam = accounts.value.find((a) => a.platform === 'steam')
   const lib = steam?.summary?.library
-  if (Array.isArray(lib) && lib.length) {
-    return lib.map((g) => ({
-      appid: g.appid,
-      game_name: g.name,
-      playtime_forever: Math.round((Number(g.hours_total) || 0) * 60),
-      week_minutes:
-        g.hours_week != null && g.hours_week !== ''
-          ? Math.round(Number(g.hours_week) * 60)
-          : null,
-      month_minutes:
-        g.hours_month != null && g.hours_month !== ''
-          ? Math.round(Number(g.hours_month) * 60)
-          : null,
-    }))
-  }
-  return steamGamesFlat()
+  if (!Array.isArray(lib)) return []
+  return lib.map((g) => ({
+    appid: g.appid,
+    game_name: g.name,
+    hours_total: Number(g.hours_total) || 0,
+    hours_2weeks: g.hours_2weeks == null ? null : Number(g.hours_2weeks),
+  }))
 })
-
-function fmtHoursFromMinutes(mins) {
-  if (mins == null) return null
-  const h = mins / 60
-  if (h >= 10) return Math.round(h).toString()
-  return (Math.round(h * 10) / 10).toFixed(1)
-}
 
 async function loadProgress() {
   try {
@@ -239,59 +223,6 @@ function closeMatch() {
   openMatchGame.value = null
 }
 
-/** Fallback: неделя/месяц из DailySnapshot на клиенте */
-function steamGamesFlat() {
-  const map = {}
-  for (const acc of accounts.value) {
-    if (acc.platform !== 'steam') continue
-    for (const s of acc.snapshots || []) {
-      const day = String(s.date).slice(0, 10)
-      if (!map[s.appid]) map[s.appid] = { name: s.game_name, byDate: {} }
-      map[s.appid].byDate[day] = Number(s.playtime_forever) || 0
-      if (!map[s.appid].name) map[s.appid].name = s.game_name
-    }
-  }
-
-  const pad = (n) => String(n).padStart(2, '0')
-  const iso = (d) =>
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-
-  const now = new Date()
-  const weekAgo = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7))
-  const monthAgo = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30))
-
-  function baseline(byDate, targetIso) {
-    let best = null
-    for (const d of Object.keys(byDate).sort()) {
-      if (d <= targetIso) best = byDate[d]
-    }
-    return best
-  }
-
-  function deltaMin(byDate, targetIso) {
-    const dates = Object.keys(byDate).sort()
-    if (dates.length < 2) return null
-    const latestVal = byDate[dates[dates.length - 1]] || 0
-    const baseVal = baseline(byDate, targetIso)
-    if (baseVal == null) return null
-    return Math.max(latestVal - baseVal, 0)
-  }
-
-  return Object.entries(map)
-    .map(([appid, g]) => {
-      const dates = Object.keys(g.byDate).sort()
-      const latestVal = dates.length ? g.byDate[dates[dates.length - 1]] : 0
-      return {
-        appid: Number(appid),
-        game_name: g.name,
-        playtime_forever: latestVal,
-        week_minutes: deltaMin(g.byDate, weekAgo),
-        month_minutes: deltaMin(g.byDate, monthAgo),
-      }
-    })
-    .sort((a, b) => b.playtime_forever - a.playtime_forever)
-}
-
 onMounted(() => {
   loadAccounts()
   loadProgress()
@@ -421,37 +352,19 @@ onMounted(() => {
             <tr>
               <th>Игра</th>
               <th>Часы всего</th>
-              <th>За неделю</th>
-              <th>За месяц</th>
+              <th>За 2 недели</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in steamLibraryRows" :key="row.appid">
               <td class="game-cell">{{ row.game_name }}</td>
-              <td class="hours-cell">
-                {{ Math.round(row.playtime_forever / 60) }}ч
-              </td>
+              <td class="hours-cell">{{ Math.round(row.hours_total) }}ч</td>
               <td class="today-cell">
-                <template v-if="row.week_minutes != null">
-                  <span v-if="row.week_minutes > 0">+{{ fmtHoursFromMinutes(row.week_minutes) }}ч</span>
+                <template v-if="row.hours_2weeks != null">
+                  <span v-if="row.hours_2weeks > 0">{{ row.hours_2weeks }}ч</span>
                   <span v-else class="muted">0ч</span>
                 </template>
-                <span
-                  v-else
-                  class="muted"
-                  title="Нужно минимум 2 дня синка Steam"
-                >—</span>
-              </td>
-              <td class="today-cell">
-                <template v-if="row.month_minutes != null">
-                  <span v-if="row.month_minutes > 0">+{{ fmtHoursFromMinutes(row.month_minutes) }}ч</span>
-                  <span v-else class="muted">0ч</span>
-                </template>
-                <span
-                  v-else
-                  class="muted"
-                  title="Нужно минимум 2 дня синка Steam"
-                >—</span>
+                <span v-else class="muted" title="Нажми ↻ на Steam, чтобы обновить">—</span>
               </td>
             </tr>
           </tbody>

@@ -48,6 +48,7 @@ class DailySnapshot(models.Model):
     appid = models.IntegerField()
     game_name = models.CharField(max_length=100)
     playtime_forever = models.IntegerField(help_text="в минутах, общее время на момент снимка")
+    playtime_2weeks = models.IntegerField(null=True, blank=True, help_text="минуты за последние 14 дней")
     date = models.DateField()
 
     class Meta:
