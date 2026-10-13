@@ -7,7 +7,10 @@ python manage.py migrate --noinput
 echo "Collecting static..."
 python manage.py collectstatic --noinput
 
-# Суперюзер — только если заданы переменные и его ещё нет
+# Склейка дублей Steam (можно убрать после одного удачного деплоя)
+echo "Fixing steam accounts..."
+python manage.py fix_steam_accounts || echo "fix_steam_accounts skipped/failed"
+
 if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
   echo "Creating superuser..."
   python manage.py createsuperuser --noinput \
