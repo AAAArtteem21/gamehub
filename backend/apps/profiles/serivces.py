@@ -136,62 +136,86 @@ class ProfileSyncService:
 
     def _auto_link_steam_accounts(self, games):
         """
-        После _sync_steam: создаём opendota / deadlock / faceit без дублей.
-        Ошибки любой платформы НЕ роняют Steam-синк.
-        Синки новых аккаунтов — в фоне.
+        После _sync_steam: opendota / deadlock / faceit без дублей.
+        Ошибки платформ не роняют Steam. Новые аккаунты — фон-синк.
         """
         user = self.account.user
-        steam_id = self.account.external_id
-        account_id = int(steam_id) & 0xFFFFFFFF  # тот же расчёт, что у OpenDota
+        steam_id = str(self.account.external_id or "").strip()
+        if not steam_id:
+            return
+
+        try:
+            account_id = str(int(steam_id) & 0xFFFFFFFF)
+        except (TypeError, ValueError):
+            return
+
         self.linked_accounts = []
+        appids = {g["appid"]: g for g in (games or [])}
 
-        appids = {g["appid"]: g for g in games}
-
-        def _link(platform, external_id):
+        def _link(platform, external_id, *, extra=None, nickname="", game_label=""):
+            external_id = str(external_id).strip()
+            if not external_id:
+                return None
             if GameAccount.objects.filter(user=user, platform=platform).exists():
+                return None
+            if GameAccount.objects.filter(platform=platform, external_id=external_id).exists():
                 return None
             try:
                 acc = GameAccount.objects.create(
-                    user=user, platform=platform, external_id=str(external_id)
+                    user=user,
+                    platform=platform,
+                    external_id=external_id,
+                    nickname=nickname or "",
+                    game_label=game_label or "",
+                    extra_stats=extra or {},
                 )
             except IntegrityError:
                 return None
             self.linked_accounts.append(acc)
             return acc
 
-        # --- Dota 2 → OpenDota (только если игра есть в библиотеке) ---
+        # Dota 2 → OpenDota
         if 570 in appids:
-            acc = _link("opendota", account_id)
+            acc = _link("opendota", account_id, game_label="Dota 2")
             if acc:
                 self._spawn_background_sync(acc)
 
-        # --- Deadlock (часы сразу из owned games, стату — в фоне) ---
+        # Deadlock
         if DEADLOCK_APPID in appids:
-            acc = _link("deadlock", account_id)
+            hours = round((appids[DEADLOCK_APPID].get("playtime_forever") or 0) / 60, 1)
+            acc = _link(
+                "deadlock",
+                account_id,
+                extra={"hours_played": hours, "match_history": []},
+                game_label="Deadlock",
+            )
             if acc:
-                hours = round(appids[DEADLOCK_APPID].get("playtime_forever", 0) / 60, 1)
-                acc.extra_stats = {"hours_played": hours, "match_history": []}
-                acc.game_label = "Deadlock"
-                acc.save(update_fields=["extra_stats", "game_label"])
                 self._spawn_background_sync(acc)
 
-        # --- Faceit по SteamID (может отсутствовать — это нормально) ---
-        neg_cache_key = f"faceit_neg_by_steam:{steam_id}"
-        if not cache.get(neg_cache_key):
+        # Faceit по SteamID64
+        neg_key = f"faceit_neg_by_steam:{steam_id}"
+        if not cache.get(neg_key):
             try:
-                from .integrations.faceit_client import FaceitClient
                 player = FaceitClient().get_player_by_steam_id(steam_id)
-                player_id = (player or {}).get("player_id")
-                if player_id:
-                    acc = _link("faceit", player.get("nickname") or player_id)
+                pid = (player or {}).get("player_id")
+                nick = (player or {}).get("nickname") or pid
+                if pid and nick:
+                    acc = _link(
+                        "faceit",
+                        nick,
+                        extra={"player_id": pid},
+                        nickname=nick,
+                        game_label="Faceit CS2",
+                    )
                     if acc:
-                        acc.extra_stats = {"player_id": player_id}
-                        acc.save(update_fields=["extra_stats"])
+                        if player.get("avatar"):
+                            acc.avatar = player["avatar"]
+                            acc.save(update_fields=["avatar"])
                         self._spawn_background_sync(acc)
                 else:
-                    cache.set(neg_cache_key, True, timeout=3600)  # не долбим повторно час
+                    cache.set(neg_key, True, timeout=3600)
             except Exception:
-                pass  # нет ключа Faceit / 404 / rate limit — Steam-синк не валим
+                pass
 
     def _sync_deadlock(self):
         """Deadlock: rank + match-history. account-stats/mate-stats часто 403 без ключа — не роняем синк."""
@@ -1018,7 +1042,10 @@ class ProfileSyncService:
                 }
                 self.account.extra_stats = existing
                 self.account.save(update_fields=["extra_stats"])
-        self._auto_link_steam_accounts(games)
+        try:
+            self._auto_link_steam_accounts(games)
+        except Exception:
+            pass
 
     def _sync_opendota(self):
         client = OpenDotaClient()
