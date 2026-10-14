@@ -81,6 +81,11 @@ const donutWin = computed(() => {
   return (weeklyWins.value / weeklyTotal.value) * 100
 })
 
+/* SVG-кольцо */
+const RING_R = 42
+const RING_C = 2 * Math.PI * RING_R
+const winArc = computed(() => (donutWin.value / 100) * RING_C)
+
 /** Нормализованная форма W/L */
 const formList = computed(() => {
   const raw = weekly.value?.recent_form || weekly.value?.form || []
@@ -445,17 +450,29 @@ onMounted(() => {
         <template v-if="weekly && weeklyTotal > 0">
           <div class="week-main">
             <div class="ring-block">
-              <div
-                class="ring"
-                :style="{
-                  background: `conic-gradient(
-                    var(--success) 0 ${donutWin}%,
-                    rgba(230, 57, 70, 0.85) ${donutWin}% 100%
-                  )`,
-                }"
-              >
-                <div class="ring-hole">
-                  <span class="ring-pct">{{ weeklyWinPct }}%</span>
+              <div class="ring">
+                <svg viewBox="0 0 100 100" class="ring-svg" aria-hidden="true">
+                  <!-- подложка: красная, если есть поражения -->
+                  <circle
+                    cx="50"
+                    cy="50"
+                    :r="RING_R"
+                    class="ring-track"
+                    :class="{ loss: weeklyLosses > 0 }"
+                  />
+                  <!-- дуга побед -->
+                  <circle
+                    v-if="weeklyWins > 0"
+                    cx="50"
+                    cy="50"
+                    :r="RING_R"
+                    class="ring-win"
+                    :stroke-dasharray="`${winArc} ${RING_C}`"
+                  />
+                </svg>
+                <div class="ring-center">
+                  <span class="ring-pct">{{ weeklyWinPct }}<small>%</small></span>
+                  <span class="ring-sub">winrate</span>
                 </div>
               </div>
               <div class="ring-meta">
@@ -508,7 +525,9 @@ onMounted(() => {
             </div>
             <div class="heat-scale">
               <span>меньше</span>
-              <i class="hcell l0" /><i class="hcell l1" /><i class="hcell l2" /><i class="hcell l3" /><i class="hcell l4" />
+              <span class="scale-cells">
+                <i class="hcell l0" /><i class="hcell l1" /><i class="hcell l2" /><i class="hcell l3" /><i class="hcell l4" />
+              </span>
               <span>больше</span>
             </div>
           </div>
@@ -852,83 +871,104 @@ onMounted(() => {
 .week-main {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 20px;
   flex-wrap: wrap;
 }
 
-/* Тонкое кольцо через mask */
+/* —— Кольцо винрейта (SVG) —— */
 .ring-block {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
 }
 .ring {
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* толщина «обода» ~9px */
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
-}
-.ring-hole {
-  width: 62px;
-  height: 62px;
-  border-radius: 50%;
-  background: var(--bg-card);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* маска съедает центр — текст поверх через position */
-  position: absolute;
-}
-.ring-block {
   position: relative;
+  width: 112px;
+  height: 112px;
 }
-.ring-block .ring-hole {
+.ring-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.ring-track,
+.ring-win {
+  fill: none;
+  stroke-width: 9;
+}
+.ring-track {
+  stroke: var(--bg-sunken);
+}
+.ring-track.loss {
+  stroke: var(--danger);
+  opacity: 0.85;
+}
+.ring-win {
+  stroke: var(--success);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.7s var(--ease, ease);
+}
+.ring-center {
   position: absolute;
-  top: 13px;
-  left: 50%;
-  transform: translateX(-50%);
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
   pointer-events: none;
-  background: transparent;
 }
 .ring-pct {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 800;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--text-primary);
+}
+.ring-pct small {
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 1px;
+  color: var(--text-secondary);
+}
+.ring-sub {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
 }
 .ring-meta {
   display: flex;
   gap: 10px;
   font-size: 11px;
   color: var(--text-secondary);
-  margin-top: 4px;
 }
 .ring-meta .w { color: var(--success); }
 .ring-meta .l { color: var(--danger); }
 .ring-meta .mute { color: var(--text-muted); }
 
+/* —— Мини-карточки —— */
 .week-panels {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
   gap: 8px;
   flex: 1;
   min-width: 140px;
+  max-width: 420px;
 }
 .mini-stat {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  padding: 10px 8px;
+  padding: 12px 8px;
   background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -985,7 +1025,8 @@ onMounted(() => {
   color: var(--danger);
 }
 
-.heat-block { margin-top: 12px; }
+/* —— Heatmap —— */
+.heat-block { margin-top: 14px; }
 .heat-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -1030,21 +1071,31 @@ onMounted(() => {
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
+
+/* легенда — плотная группа справа, без растягивания */
 .heat-scale {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 10px;
   font-size: 9px;
   color: var(--text-muted);
 }
-.heat-scale .hcell {
+.scale-cells {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.scale-cells .hcell {
   width: 10px;
   height: 10px;
   max-width: none;
   aspect-ratio: auto;
   border-radius: 2px;
+  margin: 0;
+  flex: none;
+  box-shadow: none;
 }
 
 .week-empty {
@@ -1228,5 +1279,6 @@ onMounted(() => {
   .games-table-card { overflow-x: auto; }
   .games-table { min-width: 480px; }
   .gh-bar { max-width: none; }
+  .week-panels { max-width: none; }
 }
 </style>
