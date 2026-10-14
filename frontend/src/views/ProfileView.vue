@@ -67,17 +67,120 @@ const steamLibraryRows = computed(() => {
   }))
 })
 
+const weeklyWins = computed(() => Number(weekly.value?.wins) || 0)
+const weeklyLosses = computed(() => Number(weekly.value?.losses) || 0)
+const weeklyTotal = computed(() => weeklyWins.value + weeklyLosses.value)
+
 const weeklyWinPct = computed(() => {
-  if (!weekly.value) return 0
-  const t = (weekly.value.wins || 0) + (weekly.value.losses || 0)
-  if (!t) return 0
-  return Math.round((weekly.value.wins / t) * 100)
+  if (!weeklyTotal.value) return 0
+  return Math.round((weeklyWins.value / weeklyTotal.value) * 100)
 })
 
-const weeklyTotal = computed(() => {
-  if (!weekly.value) return 0
-  return (weekly.value.wins || 0) + (weekly.value.losses || 0)
+/** Доля побед для conic-gradient (0–100) */
+const donutWin = computed(() => {
+  if (!weeklyTotal.value) return 0
+  return (weeklyWins.value / weeklyTotal.value) * 100
 })
+
+const formList = computed(() => {
+  const raw = weekly.value?.recent_form || weekly.value?.form || []
+  return raw.map((f) => {
+    if (f === true || f === 'W' || f === 'w') return 'W'
+    if (f === false || f === 'L' || f === 'l') return 'L'
+    return String(f).toUpperCase().startsWith('W') ? 'W' : 'L'
+  })
+})
+
+/**
+ * Дни недели для heatmap.
+ * Приоритет: weekly.daily [{ date, wins, losses, matches }]
+ * Иначе — 7 дней от period / сегодня, матчи раскидываем по recent_form с конца.
+ */
+const weekDays = computed(() => {
+  const apiDays = weekly.value?.daily
+  if (Array.isArray(apiDays) && apiDays.length) {
+    return apiDays.map((d) => {
+      const w = Number(d.wins) || 0
+      const l = Number(d.losses) || 0
+      const m = Number(d.matches) || w + l
+      return {
+        date: d.date,
+        label: formatDayLabel(d.date),
+        wins: w,
+        losses: l,
+        matches: m,
+        level: intensity(m),
+      }
+    })
+  }
+
+  const days = last7Dates()
+  const form = [...formList.value]
+  // раскладываем форму с конца по дням (грубая визуализация, пока нет daily с бэка)
+  const buckets = days.map(() => ({ wins: 0, losses: 0 }))
+  let di = days.length - 1
+  for (let i = form.length - 1; i >= 0 && di >= 0; i--) {
+    if (form[i] === 'W') buckets[di].wins++
+    else buckets[di].losses++
+    // следующий матч — тот же день с вероятностью, иначе шаг назад
+    if (Math.random() > 0.55) di = Math.max(0, di - 1)
+  }
+  // детерминированнее: равномерно по дням с конца
+  const clean = days.map(() => ({ wins: 0, losses: 0 }))
+  let idx = days.length - 1
+  for (let i = form.length - 1; i >= 0; i--) {
+    if (form[i] === 'W') clean[idx].wins++
+    else clean[idx].losses++
+    idx = idx <= 0 ? days.length - 1 : idx - 1
+  }
+
+  return days.map((iso, i) => {
+    const w = clean[i].wins
+    const l = clean[i].losses
+    const m = w + l
+    return {
+      date: iso,
+      label: formatDayLabel(iso),
+      wins: w,
+      losses: l,
+      matches: m,
+      level: intensity(m),
+    }
+  })
+})
+
+function intensity(matches) {
+  if (!matches) return 0
+  if (matches === 1) return 1
+  if (matches === 2) return 2
+  if (matches <= 4) return 3
+  return 4
+}
+
+function last7Dates() {
+  const out = []
+  const end = new Date()
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(end)
+    d.setDate(end.getDate() - i)
+    out.push(d.toISOString().slice(0, 10))
+  }
+  return out
+}
+
+function formatDayLabel(iso) {
+  try {
+    const d = new Date(iso + 'T12:00:00')
+    return d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
+function dayTitle(day) {
+  if (!day.matches) return `${day.label}: нет матчей`
+  return `${day.label}: ${day.wins}W ${day.losses}L (${day.matches})`
+}
 
 async function loadWeekly() {
   try {
@@ -299,12 +402,13 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Недельный отчёт -->
+    <!-- ========== НЕДЕЛЯ ========== -->
     <section id="weekly" class="card weekly-card">
       <div class="weekly-head">
         <div>
           <h2 class="weekly-title">Эта неделя</h2>
           <p class="weekly-period" v-if="weekly?.period">{{ weekly.period }}</p>
+          <p class="weekly-period" v-else>Последние 7 дней</p>
         </div>
         <div class="weekly-tabs" v-if="(weekly?.available_games || []).length">
           <button
@@ -325,50 +429,100 @@ onMounted(() => {
       </div>
 
       <template v-if="weekly && weeklyTotal > 0">
-        <div class="weekly-stats">
-          <div class="wstat">
-            <span class="wstat-val accent">{{ weeklyWinPct }}%</span>
-            <span class="wstat-lbl">винрейт</span>
+        <div class="weekly-body">
+          <!-- Кольцо -->
+          <div class="donut-wrap">
+            <div
+              class="donut"
+              :style="{
+                background: `conic-gradient(
+                  var(--success) 0 ${donutWin}%,
+                  var(--danger) ${donutWin}% 100%
+                )`,
+              }"
+            >
+              <div class="donut-hole">
+                <span class="donut-pct">{{ weeklyWinPct }}%</span>
+                <span class="donut-sub">винрейт</span>
+              </div>
+            </div>
+            <div class="donut-legend">
+              <span class="leg win"><i />{{ weeklyWins }} побед</span>
+              <span class="leg loss"><i />{{ weeklyLosses }} пораж.</span>
+              <span class="leg mute">{{ weeklyTotal }} матчей</span>
+            </div>
           </div>
-          <div class="wstat">
-            <span class="wstat-val win">{{ weekly.wins }}</span>
-            <span class="wstat-lbl">побед</span>
-          </div>
-          <div class="wstat">
-            <span class="wstat-val loss">{{ weekly.losses }}</span>
-            <span class="wstat-lbl">поражений</span>
-          </div>
-          <div class="wstat">
-            <span class="wstat-val">{{ weeklyTotal }}</span>
-            <span class="wstat-lbl">матчей</span>
-          </div>
-          <div class="wstat" v-if="weekly.streak_wins > 1">
-            <span class="wstat-val win">{{ weekly.streak_wins }}</span>
-            <span class="wstat-lbl">серия W</span>
+
+          <!-- Цифры + форма -->
+          <div class="weekly-side">
+            <div class="weekly-stats">
+              <div class="wstat">
+                <span class="wstat-val win">{{ weeklyWins }}</span>
+                <span class="wstat-lbl">W</span>
+              </div>
+              <div class="wstat">
+                <span class="wstat-val loss">{{ weeklyLosses }}</span>
+                <span class="wstat-lbl">L</span>
+              </div>
+              <div class="wstat" v-if="weekly.streak_wins > 1">
+                <span class="wstat-val accent">{{ weekly.streak_wins }}</span>
+                <span class="wstat-lbl">серия</span>
+              </div>
+              <div class="wstat" v-if="weekly.best_hero">
+                <span class="wstat-val hero">{{ weekly.best_hero }}</span>
+                <span class="wstat-lbl">топ</span>
+              </div>
+            </div>
+
+            <div class="form-block" v-if="formList.length">
+              <span class="extra-lbl">Последние катки</span>
+              <div class="form-pills">
+                <span
+                  v-for="(f, i) in formList.slice(0, 16)"
+                  :key="i"
+                  class="fp"
+                  :class="f === 'W' ? 'w' : 'l'"
+                >{{ f }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="weekly-extra" v-if="weekly.best_hero || (weekly.recent_form || []).length">
-          <div class="weekly-best" v-if="weekly.best_hero">
-            <span class="extra-lbl">Лучший</span>
-            <span class="extra-val">{{ weekly.best_hero }}</span>
-          </div>
-          <div class="weekly-form" v-if="(weekly.recent_form || []).length">
-            <span class="extra-lbl">Форма</span>
-            <div class="form-pills">
-              <span
-                v-for="(f, i) in weekly.recent_form.slice(0, 12)"
-                :key="i"
-                class="fp"
-                :class="f === 'W' || f === true ? 'w' : 'l'"
-              >{{ f === true ? 'W' : f === false ? 'L' : f }}</span>
+        <!-- Heatmap как commits -->
+        <div class="heat-block">
+          <div class="heat-head">
+            <span class="extra-lbl">Активность по дням</span>
+            <div class="heat-scale">
+              <span>меньше</span>
+              <i class="hcell l0" /><i class="hcell l1" /><i class="hcell l2" /><i class="hcell l3" /><i class="hcell l4" />
+              <span>больше</span>
             </div>
+          </div>
+          <div class="heat-row">
+            <button
+              v-for="day in weekDays"
+              :key="day.date"
+              type="button"
+              class="heat-day"
+              :title="dayTitle(day)"
+            >
+              <span
+                class="hcell"
+                :class="'l' + day.level"
+              />
+              <span class="heat-label">{{ day.label }}</span>
+              <span class="heat-count" v-if="day.matches">{{ day.matches }}</span>
+            </button>
           </div>
         </div>
       </template>
 
       <div v-else class="weekly-empty">
-        Пока нет матчей за эту неделю — сыграй или нажми ↻ на игровом аккаунте.
+        <div class="empty-visual" aria-hidden="true">
+          <span class="hcell l0" /><span class="hcell l0" /><span class="hcell l1" /><span class="hcell l0" /><span class="hcell l0" /><span class="hcell l0" /><span class="hcell l0" />
+        </div>
+        <p>Пока нет матчей за эту неделю.</p>
+        <p class="empty-hint-line">Сыграй или нажми ↻ на игровом аккаунте — здесь появится кольцо, форма и календарь каток.</p>
       </div>
     </section>
 
@@ -530,10 +684,7 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
-.header-main {
-  min-width: 0;
-  flex: 1;
-}
+.header-main { min-width: 0; flex: 1; }
 .profile-header h1 {
   margin: 0 0 4px;
   font-size: 22px;
@@ -581,18 +732,13 @@ onMounted(() => {
   height: 100%;
   background: var(--accent);
   border-radius: 3px;
-  transition: width 0.25s ease;
 }
 .gh-xp {
   font-size: 11px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
-.gh-meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
+.gh-meta { display: flex; gap: 6px; flex-wrap: wrap; }
 .gh-tag,
 .gh-boost {
   font-size: 10px;
@@ -640,14 +786,15 @@ onMounted(() => {
   font-weight: 600;
   cursor: pointer;
 }
-.btn-ref:disabled {
-  opacity: 0.5;
-}
+.btn-ref:disabled { opacity: 0.5; }
 
-/* Weekly */
+/* —— Weekly showcase —— */
 .weekly-card {
-  padding: 18px 20px !important;
+  padding: 20px 22px !important;
   scroll-margin-top: 72px;
+  background:
+    radial-gradient(ellipse 80% 60% at 0% 0%, var(--accent-dim), transparent 55%),
+    var(--bg-card);
 }
 .weekly-head {
   display: flex;
@@ -655,14 +802,14 @@ onMounted(() => {
   align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 .weekly-title {
   margin: 0 0 4px;
   font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
 }
 .weekly-period {
@@ -671,11 +818,7 @@ onMounted(() => {
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
-.weekly-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+.weekly-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .wtab {
   font-size: 11px;
   font-weight: 600;
@@ -691,10 +834,88 @@ onMounted(() => {
   color: var(--accent);
   background: var(--accent-dim);
 }
+
+.weekly-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 28px;
+  align-items: center;
+}
+@media (max-width: 700px) {
+  .weekly-body { grid-template-columns: 1fr; justify-items: center; }
+}
+
+.donut-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.donut {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px var(--border-color), 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+.donut-hole {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid var(--border-color);
+}
+.donut-pct {
+  font-size: 28px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.donut-sub {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.donut-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  justify-content: center;
+  font-size: 12px;
+}
+.leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.leg i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.leg.win i { background: var(--success); }
+.leg.loss i { background: var(--danger); }
+.leg.mute { color: var(--text-muted); }
+
+.weekly-side { width: 100%; min-width: 0; }
 .weekly-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
 }
 .wstat {
   display: flex;
@@ -707,39 +928,40 @@ onMounted(() => {
   border-radius: var(--radius-sm);
 }
 .wstat-val {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-.wstat-val.accent { color: var(--accent); }
 .wstat-val.win { color: var(--success); }
 .wstat-val.loss { color: var(--danger); }
+.wstat-val.accent { color: var(--accent); }
+.wstat-val.hero {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font);
+  text-align: center;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .wstat-lbl {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--text-muted);
 }
-.weekly-extra {
-  margin-top: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px 24px;
-  align-items: center;
-}
+
 .extra-lbl {
   display: block;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
-  margin-bottom: 4px;
-}
-.extra-val {
-  font-size: 14px;
-  font-weight: 600;
+  margin-bottom: 8px;
 }
 .form-pills {
   display: flex;
@@ -747,9 +969,9 @@ onMounted(() => {
   gap: 4px;
 }
 .fp {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
   font-size: 10px;
   font-weight: 800;
   display: flex;
@@ -757,18 +979,113 @@ onMounted(() => {
   justify-content: center;
 }
 .fp.w {
-  background: rgba(74, 222, 128, 0.15);
+  background: rgba(74, 222, 128, 0.18);
   color: var(--success);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.25);
 }
 .fp.l {
   background: rgba(230, 57, 70, 0.15);
   color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(230, 57, 70, 0.25);
 }
-.weekly-empty {
-  padding: 20px 8px;
+
+/* Heatmap */
+.heat-block {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-color);
+}
+.heat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.heat-scale {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.heat-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+.heat-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  color: inherit;
+}
+.hcell {
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 44px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  display: block;
+  margin: 0 auto;
+  transition: transform 0.12s var(--ease);
+}
+.heat-day:hover .hcell {
+  transform: scale(1.06);
+}
+.hcell.l0 { background: var(--bg-sunken); }
+.hcell.l1 { background: rgba(230, 57, 70, 0.22); border-color: transparent; }
+.hcell.l2 { background: rgba(230, 57, 70, 0.4); border-color: transparent; }
+.hcell.l3 { background: rgba(230, 57, 70, 0.65); border-color: transparent; }
+.hcell.l4 {
+  background: var(--accent);
+  border-color: transparent;
+  box-shadow: 0 0 12px var(--accent-dim);
+}
+.heat-label {
+  font-size: 10px;
+  color: var(--text-muted);
   text-align: center;
-  font-size: 13px;
+  line-height: 1.2;
+}
+.heat-count {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
   color: var(--text-secondary);
+}
+
+.weekly-empty {
+  text-align: center;
+  padding: 28px 12px 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.empty-visual {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.empty-visual .hcell {
+  width: 28px;
+  height: 28px;
+  max-width: none;
+  aspect-ratio: auto;
+}
+.empty-hint-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 360px;
+  margin-left: auto;
+  margin-right: auto;
   line-height: 1.45;
 }
 
@@ -801,10 +1118,7 @@ onMounted(() => {
   border-radius: var(--radius-sm);
   padding: 6px 10px;
 }
-.platform-label {
-  font-weight: 600;
-  font-size: 12px;
-}
+.platform-label { font-weight: 600; font-size: 12px; }
 .chip-nick {
   font-size: 11px;
   color: var(--text-secondary);
@@ -819,9 +1133,7 @@ onMounted(() => {
   border-radius: 50%;
   background: var(--text-muted);
 }
-.verified-dot.ok {
-  background: var(--success);
-}
+.verified-dot.ok { background: var(--success); }
 .icon-btn {
   background: var(--bg-sunken);
   border: 1px solid var(--border-color);
@@ -835,9 +1147,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
 }
-.icon-btn:disabled {
-  opacity: 0.5;
-}
+.icon-btn:disabled { opacity: 0.5; }
 .icon-btn.danger:hover:not(:disabled) {
   color: var(--danger);
   border-color: var(--danger);
@@ -891,9 +1201,7 @@ onMounted(() => {
   letter-spacing: 0.04em;
   color: var(--text-secondary);
 }
-.table-title {
-  padding: 14px 16px 0;
-}
+.table-title { padding: 14px 16px 0; }
 .games-table-card {
   padding: 0 !important;
   overflow: hidden;
@@ -918,15 +1226,9 @@ onMounted(() => {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-color);
 }
-.games-table tr:last-child td {
-  border-bottom: none;
-}
-.games-table tbody tr:hover {
-  background: var(--bg-card-hover);
-}
-.game-cell {
-  font-weight: 500;
-}
+.games-table tr:last-child td { border-bottom: none; }
+.games-table tbody tr:hover { background: var(--bg-card-hover); }
+.game-cell { font-weight: 500; }
 .hours-cell {
   font-weight: 600;
   font-family: var(--font-mono);
@@ -937,9 +1239,7 @@ onMounted(() => {
   font-size: 12px;
   font-family: var(--font-mono);
 }
-.muted {
-  color: var(--text-muted);
-}
+.muted { color: var(--text-muted); }
 
 .state-message {
   padding: 48px 20px;
@@ -955,31 +1255,16 @@ onMounted(() => {
   align-items: center;
   gap: 14px;
 }
-.error-state {
-  color: var(--danger);
-}
+.error-state { color: var(--danger); }
 
 @media (max-width: 900px) {
-  .profile-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .avatar-big {
-    width: 56px;
-    height: 56px;
-  }
-  .section-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .games-table-card {
-    overflow-x: auto;
-  }
-  .games-table {
-    min-width: 480px;
-  }
-  .gh-bar {
-    max-width: none;
-  }
+  .profile-header { flex-direction: column; align-items: stretch; }
+  .avatar-big { width: 56px; height: 56px; }
+  .section-header { flex-direction: column; align-items: stretch; }
+  .games-table-card { overflow-x: auto; }
+  .games-table { min-width: 480px; }
+  .gh-bar { max-width: none; }
+  .heat-row { gap: 4px; }
+  .heat-label { font-size: 9px; }
 }
 </style>
