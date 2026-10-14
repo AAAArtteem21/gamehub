@@ -26,6 +26,9 @@ const progress = ref(null)
 const refCodeInput = ref('')
 const refBusy = ref(false)
 
+const weekly = ref(null)
+const weeklyGame = ref('all')
+
 const platformLabels = {
   steam: 'Steam',
   faceit: 'Faceit',
@@ -52,7 +55,6 @@ const activeAccount = computed(
   () => statsAccounts.value.find((a) => a.id === activeStatsTab.value) || statsAccounts.value[0]
 )
 
-/** Библиотека Steam: summary.library с API (hours_total + hours_2weeks) */
 const steamLibraryRows = computed(() => {
   const steam = accounts.value.find((a) => a.platform === 'steam')
   const lib = steam?.summary?.library
@@ -64,6 +66,36 @@ const steamLibraryRows = computed(() => {
     hours_2weeks: g.hours_2weeks == null ? null : Number(g.hours_2weeks),
   }))
 })
+
+const weeklyWinPct = computed(() => {
+  if (!weekly.value) return 0
+  const t = (weekly.value.wins || 0) + (weekly.value.losses || 0)
+  if (!t) return 0
+  return Math.round((weekly.value.wins / t) * 100)
+})
+
+const weeklyTotal = computed(() => {
+  if (!weekly.value) return 0
+  return (weekly.value.wins || 0) + (weekly.value.losses || 0)
+})
+
+async function loadWeekly() {
+  try {
+    const params = {}
+    if (weeklyGame.value && weeklyGame.value !== 'all') {
+      params.game = weeklyGame.value
+    }
+    const res = await api.get('me/weekly-report/', { params })
+    weekly.value = res.data
+  } catch {
+    weekly.value = null
+  }
+}
+
+function setWeeklyGame(g) {
+  weeklyGame.value = g
+  loadWeekly()
+}
 
 async function loadProgress() {
   try {
@@ -169,6 +201,7 @@ async function handleSync(id) {
         toast.success('Синхронизация завершена')
         await loadAccounts()
         loadProgress()
+        loadWeekly()
       } else if (res.data.status === 'error') {
         clearInterval(poll)
         toast.error(res.data.detail || 'Ошибка синхронизации')
@@ -219,6 +252,7 @@ function closeMatch() {
 onMounted(() => {
   loadAccounts()
   loadProgress()
+  loadWeekly()
 })
 </script>
 
@@ -264,6 +298,79 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Недельный отчёт -->
+    <section id="weekly" class="card weekly-card">
+      <div class="weekly-head">
+        <div>
+          <h2 class="weekly-title">Эта неделя</h2>
+          <p class="weekly-period" v-if="weekly?.period">{{ weekly.period }}</p>
+        </div>
+        <div class="weekly-tabs" v-if="(weekly?.available_games || []).length">
+          <button
+            type="button"
+            class="wtab"
+            :class="{ active: weeklyGame === 'all' }"
+            @click="setWeeklyGame('all')"
+          >Все</button>
+          <button
+            v-for="g in weekly.available_games"
+            :key="g.value"
+            type="button"
+            class="wtab"
+            :class="{ active: weeklyGame === g.value }"
+            @click="setWeeklyGame(g.value)"
+          >{{ g.label }}</button>
+        </div>
+      </div>
+
+      <template v-if="weekly && weeklyTotal > 0">
+        <div class="weekly-stats">
+          <div class="wstat">
+            <span class="wstat-val accent">{{ weeklyWinPct }}%</span>
+            <span class="wstat-lbl">винрейт</span>
+          </div>
+          <div class="wstat">
+            <span class="wstat-val win">{{ weekly.wins }}</span>
+            <span class="wstat-lbl">побед</span>
+          </div>
+          <div class="wstat">
+            <span class="wstat-val loss">{{ weekly.losses }}</span>
+            <span class="wstat-lbl">поражений</span>
+          </div>
+          <div class="wstat">
+            <span class="wstat-val">{{ weeklyTotal }}</span>
+            <span class="wstat-lbl">матчей</span>
+          </div>
+          <div class="wstat" v-if="weekly.streak_wins > 1">
+            <span class="wstat-val win">{{ weekly.streak_wins }}</span>
+            <span class="wstat-lbl">серия W</span>
+          </div>
+        </div>
+
+        <div class="weekly-extra" v-if="weekly.best_hero || (weekly.recent_form || []).length">
+          <div class="weekly-best" v-if="weekly.best_hero">
+            <span class="extra-lbl">Лучший</span>
+            <span class="extra-val">{{ weekly.best_hero }}</span>
+          </div>
+          <div class="weekly-form" v-if="(weekly.recent_form || []).length">
+            <span class="extra-lbl">Форма</span>
+            <div class="form-pills">
+              <span
+                v-for="(f, i) in weekly.recent_form.slice(0, 12)"
+                :key="i"
+                class="fp"
+                :class="f === 'W' || f === true ? 'w' : 'l'"
+              >{{ f === true ? 'W' : f === false ? 'L' : f }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <div v-else class="weekly-empty">
+        Пока нет матчей за эту неделю — сыграй или нажми ↻ на игровом аккаунте.
+      </div>
+    </section>
 
     <div class="section-header">
       <h2>Подключённые аккаунты</h2>
@@ -535,6 +642,134 @@ onMounted(() => {
 }
 .btn-ref:disabled {
   opacity: 0.5;
+}
+
+/* Weekly */
+.weekly-card {
+  padding: 18px 20px !important;
+  scroll-margin-top: 72px;
+}
+.weekly-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.weekly-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.weekly-period {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.weekly-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wtab {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.wtab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.weekly-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 10px;
+}
+.wstat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.wstat-val {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.wstat-val.accent { color: var(--accent); }
+.wstat-val.win { color: var(--success); }
+.wstat-val.loss { color: var(--danger); }
+.wstat-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.weekly-extra {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: center;
+}
+.extra-lbl {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.extra-val {
+  font-size: 14px;
+  font-weight: 600;
+}
+.form-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fp {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fp.w {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--success);
+}
+.fp.l {
+  background: rgba(230, 57, 70, 0.15);
+  color: var(--danger);
+}
+.weekly-empty {
+  padding: 20px 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
 }
 
 .section-header {

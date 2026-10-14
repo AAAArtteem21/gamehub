@@ -32,7 +32,6 @@ const clanPanels = ref([])
 const activeClanIdx = ref(0)
 const chatText = ref('')
 const chatSending = ref(false)
-const weeklyGame = ref('all')
 
 const roleLabel = { leader: 'Лидер', officer: 'Офицер', member: 'Участник' }
 
@@ -72,6 +71,11 @@ function onNavClick() {
   closeSidebar()
 }
 
+function goWeekly() {
+  closeSidebar()
+  router.push({ path: '/profile', hash: '#weekly' })
+}
+
 async function loadQuickStats() {
   try {
     const res = await api.get('me/quick-stats/')
@@ -83,11 +87,7 @@ async function loadQuickStats() {
 
 async function loadWeekly() {
   try {
-    const params = {}
-    if (weeklyGame.value && weeklyGame.value !== 'all') {
-      params.game = weeklyGame.value
-    }
-    const res = await api.get('me/weekly-report/', { params })
+    const res = await api.get('me/weekly-report/')
     weekly.value = res.data
   } catch {
     weekly.value = null
@@ -105,11 +105,6 @@ async function loadFavorites() {
 
 async function loadSocial() {
   await Promise.all([loadWeekly(), loadFavorites()])
-}
-
-function setWeeklyGame(g) {
-  weeklyGame.value = g
-  loadWeekly()
 }
 
 async function loadClanPanel() {
@@ -177,44 +172,28 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
       </RouterLink>
     </nav>
 
-    <div class="sidebar-widget" v-if="weekly">
+    <button
+      v-if="weekly"
+      type="button"
+      class="sidebar-widget week-teaser"
+      @click="goWeekly"
+    >
       <span class="widget-title">Эта неделя</span>
-      <div class="week-games" v-if="(weekly.available_games || []).length">
-        <button
-          type="button"
-          class="pill-btn"
-          :class="{ active: weeklyGame === 'all' }"
-          @click="setWeeklyGame('all')"
-        >Все</button>
-        <button
-          v-for="g in weekly.available_games"
-          :key="g.value"
-          type="button"
-          class="pill-btn"
-          :class="{ active: weeklyGame === g.value }"
-          @click="setWeeklyGame(g.value)"
-        >{{ g.label }}</button>
+      <div class="teaser-row">
+        <span class="teaser-pct">{{ winPct }}%</span>
+        <span class="teaser-wl">
+          <b class="w">{{ weekly.wins || 0 }}</b>W
+          ·
+          <b class="l">{{ weekly.losses || 0 }}</b>L
+        </span>
       </div>
-      <div class="week-row">
-        <div
-          class="week-ring"
-          :style="{
-            background: `conic-gradient(var(--accent) 0 ${winPct}%, var(--bg-sunken) ${winPct}% 100%)`,
-          }"
-        >
-          <div class="week-ring-inner">{{ winPct }}%</div>
-        </div>
-        <div class="week-nums">
-          <div><b class="w">{{ weekly.wins }}</b> побед</div>
-          <div><b class="l">{{ weekly.losses }}</b> пораж.</div>
-          <div class="best" v-if="weekly.best_hero">{{ weekly.best_hero }}</div>
-        </div>
+      <div class="teaser-meta">
+        <span v-if="weekly.best_hero">{{ weekly.best_hero }}</span>
+        <span v-else-if="weekMatches">{{ weekMatches }} матч.</span>
+        <span v-else class="muted-hint">нет матчей</span>
+        <span class="teaser-link">В профиле →</span>
       </div>
-      <div class="period" v-if="weekly.period">{{ weekly.period }}</div>
-      <div class="period" v-if="weekly.streak_wins > 1">
-        Серия: <b class="w">{{ weekly.streak_wins }}</b>
-      </div>
-    </div>
+    </button>
 
     <div class="sidebar-widget" v-if="!auth.isAuthenticated">
       <span class="widget-title">Аккаунт</span>
@@ -344,8 +323,8 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   gap: 6px;
   flex-shrink: 0;
   padding: 8px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
+  background: var(--panel-bg, var(--bg-card));
+  border: 1px solid var(--panel-border, var(--border-color));
   border-radius: 14px;
 }
 .nav-item {
@@ -368,7 +347,6 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   background: var(--accent-dim);
   border-color: var(--accent);
   color: var(--text-primary);
-  box-shadow: 0 0 16px var(--glow-soft), inset 0 0 12px var(--glow-soft);
 }
 .nav-icon {
   width: 20px;
@@ -378,11 +356,14 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   justify-content: center;
   color: var(--accent);
 }
-.nav-icon :deep(svg) { width: 18px; height: 18px; }
+.nav-icon :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
 
 .sidebar-widget {
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
+  background: var(--panel-bg, var(--bg-card));
+  border: 1px solid var(--panel-border, var(--border-color));
   border-radius: 14px;
   padding: 12px;
   display: flex;
@@ -390,13 +371,18 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   gap: 8px;
   flex-shrink: 0;
 }
-.foot-widget { margin-top: auto; }
+.foot-widget {
+  margin-top: auto;
+}
 .widget-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-.widget-star { color: var(--accent); font-size: 14px; }
+.widget-star {
+  color: var(--accent);
+  font-size: 14px;
+}
 .widget-title {
   font-size: 10px;
   color: var(--accent);
@@ -411,65 +397,68 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   font-size: 12px;
   gap: 8px;
 }
-.widget-label { color: var(--text-secondary); }
+.widget-label {
+  color: var(--text-secondary);
+}
 .widget-value {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
 }
-.widget-value.accent { color: var(--accent); }
+.widget-value.accent {
+  color: var(--accent);
+}
 
-.week-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.week-teaser {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
 }
-.week-ring {
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 14px var(--glow-soft);
+.week-teaser:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-card-hover);
 }
-.week-ring-inner {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--bg-card);
+.teaser-row {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
+  align-items: baseline;
+  gap: 10px;
+}
+.teaser-pct {
+  font-size: 20px;
   font-weight: 700;
   font-family: var(--font-mono);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
-.week-nums {
+.teaser-wl {
   font-size: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  color: var(--text-secondary);
 }
-.week-nums .w { color: var(--success); }
-.week-nums .l { color: var(--danger); }
-.best {
+.teaser-wl .w {
+  color: var(--success);
+}
+.teaser-wl .l {
+  color: var(--danger);
+}
+.teaser-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--text-muted);
-  max-width: 110px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.period { font-size: 11px; color: var(--text-muted); }
+.teaser-link {
+  color: var(--accent);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.muted-hint {
+  color: var(--text-muted);
+}
 
-.week-games,
-.clan-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
 .pill-btn {
   font-size: 10px;
   font-weight: 600;
@@ -504,7 +493,9 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   text-align: left;
   border-radius: 8px;
 }
-.fav-item:hover { background: var(--bg-card-hover); }
+.fav-item:hover {
+  background: var(--bg-card-hover);
+}
 .fav-av {
   width: 26px;
   height: 26px;
@@ -526,6 +517,11 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   text-overflow: ellipsis;
 }
 
+.clan-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .clan-one-name {
   font-size: 12px;
   font-weight: 600;
@@ -576,9 +572,18 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   border-radius: 3px;
   margin-right: 3px;
 }
-.chat-role.leader { background: var(--accent-dim); color: var(--accent); }
-.chat-role.officer { background: var(--accent-2-dim); color: var(--accent-2); }
-.chat-role.member { background: var(--bg-card); color: var(--text-muted); }
+.chat-role.leader {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.chat-role.officer {
+  background: var(--accent-2-dim);
+  color: var(--accent-2);
+}
+.chat-role.member {
+  background: var(--bg-card);
+  color: var(--text-muted);
+}
 .chat-form {
   display: flex;
   gap: 4px;
@@ -608,7 +613,9 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   font-weight: 700;
   cursor: pointer;
 }
-.chat-form button:disabled { opacity: 0.5; }
+.chat-form button:disabled {
+  opacity: 0.5;
+}
 
 @media (max-width: 900px) {
   .sidebar {
