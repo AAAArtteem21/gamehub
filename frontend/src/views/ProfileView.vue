@@ -156,6 +156,17 @@ const weekDays = computed(() => {
   })
 })
 
+/** Доп. инфо по неделе */
+const activeDays = computed(() => weekDays.value.filter((d) => d.matches > 0).length)
+
+const bestDay = computed(() => {
+  let best = null
+  for (const d of weekDays.value) {
+    if (d.wins > 0 && (!best || d.wins > best.wins)) best = d
+  }
+  return best
+})
+
 function intensity(matches) {
   if (!matches) return 0
   if (matches === 1) return 1
@@ -439,10 +450,8 @@ onMounted(() => {
               <rect width="18" height="18" x="3" y="4" rx="2" />
               <path d="M16 2v4M8 2v4M3 10h18" />
             </svg>
-            <div>
-              <span class="week-kicker">Статистика за неделю</span>
-              <p class="week-period" v-if="weekly?.period">{{ weekly.period }}</p>
-            </div>
+            <span class="week-kicker">Неделя</span>
+            <span class="week-period" v-if="weekly?.period">{{ weekly.period }}</span>
           </div>
           <div class="weekly-tabs" v-if="(weekly?.available_games || []).length">
             <button
@@ -463,7 +472,7 @@ onMounted(() => {
         </div>
 
         <template v-if="weekly && weeklyTotal > 0">
-          <div class="week-main">
+          <div class="week-body">
             <!-- Кольцо + форма -->
             <div class="ring-block">
               <div class="ring">
@@ -489,14 +498,9 @@ onMounted(() => {
                   <span class="ring-sub">winrate</span>
                 </div>
               </div>
-              <div class="ring-meta">
-                <span><b class="w">{{ weeklyWins }}</b> W</span>
-                <span><b class="l">{{ weeklyLosses }}</b> L</span>
-                <span class="mute">{{ weeklyTotal }} матч.</span>
-              </div>
               <div class="form-row" v-if="formList.length">
                 <span
-                  v-for="(f, i) in formList.slice(0, 10)"
+                  v-for="(f, i) in formList.slice(0, 8)"
                   :key="i"
                   class="fp"
                   :class="f === 'W' ? 'w' : 'l'"
@@ -504,91 +508,106 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Карточки -->
-            <div class="week-panels">
-              <div class="stat-card win">
-                <span class="sc-icon">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-                    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-                    <path d="M4 22h16" />
-                    <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-                    <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-                    <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-                  </svg>
-                </span>
-                <div class="sc-body">
-                  <span class="sc-val">{{ weeklyWins }}</span>
-                  <span class="sc-lbl">Побед</span>
+            <!-- Справа: карточки, под ними дни недели -->
+            <div class="week-side">
+              <div class="week-panels">
+                <div class="stat-card win">
+                  <span class="sc-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+                      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                      <path d="M4 22h16" />
+                      <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                      <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                      <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                    </svg>
+                  </span>
+                  <div class="sc-body">
+                    <span class="sc-val">{{ weeklyWins }}</span>
+                    <span class="sc-lbl">Побед</span>
+                  </div>
+                </div>
+
+                <div class="stat-card loss">
+                  <span class="sc-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m12.5 17-.5-1-.5 1h1z" />
+                      <path
+                        d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"
+                      />
+                      <circle cx="15" cy="12" r="1" />
+                      <circle cx="9" cy="12" r="1" />
+                    </svg>
+                  </span>
+                  <div class="sc-body">
+                    <span class="sc-val">{{ weeklyLosses }}</span>
+                    <span class="sc-lbl">Поражений</span>
+                  </div>
+                </div>
+
+                <div class="stat-card top" v-if="weekly.best_hero">
+                  <span class="sc-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
+                    </svg>
+                  </span>
+                  <div class="sc-body">
+                    <span class="sc-val sc-text" :title="weekly.best_hero">{{ weekly.best_hero }}</span>
+                    <span class="sc-lbl">Топ</span>
+                  </div>
+                </div>
+
+                <div class="stat-card streak" v-if="weekly.streak_wins > 1">
+                  <span class="sc-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                      />
+                    </svg>
+                  </span>
+                  <div class="sc-body">
+                    <span class="sc-val">{{ weekly.streak_wins }}</span>
+                    <span class="sc-lbl">Серия</span>
+                  </div>
                 </div>
               </div>
 
-              <div class="stat-card loss">
-                <span class="sc-icon">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m12.5 17-.5-1-.5 1h1z" />
-                    <path
-                      d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"
-                    />
-                    <circle cx="15" cy="12" r="1" />
-                    <circle cx="9" cy="12" r="1" />
-                  </svg>
-                </span>
-                <div class="sc-body">
-                  <span class="sc-val">{{ weeklyLosses }}</span>
-                  <span class="sc-lbl">Поражений</span>
+              <div class="heat-block">
+                <div class="heat-row">
+                  <div
+                    v-for="day in weekDays"
+                    :key="day.date"
+                    class="heat-day"
+                    :title="dayTitle(day)"
+                  >
+                    <span
+                      class="hcell"
+                      :class="dayState(day)"
+                      :style="{ '--k': day.level }"
+                    >{{ day.matches || '' }}</span>
+                    <span class="heat-label">{{ day.short }}</span>
+                  </div>
+                </div>
+
+                <div class="heat-foot">
+                  <div class="insights">
+                    <span class="ins">
+                      Дней в игре <b>{{ activeDays }}/{{ weekDays.length }}</b>
+                    </span>
+                    <span class="ins" v-if="bestDay">
+                      Лучший день <b>{{ bestDay.short }}</b> · {{ bestDay.wins }}W
+                    </span>
+                    <span class="ins">
+                      Матчей <b>{{ weeklyTotal }}</b>
+                    </span>
+                  </div>
+                  <div class="heat-scale">
+                    <span class="hs-item"><i class="hs-dot win" />W</span>
+                    <span class="hs-item"><i class="hs-dot mix" />=</span>
+                    <span class="hs-item"><i class="hs-dot loss" />L</span>
+                  </div>
                 </div>
               </div>
-
-              <div class="stat-card top" v-if="weekly.best_hero">
-                <span class="sc-icon">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
-                  </svg>
-                </span>
-                <div class="sc-body">
-                  <span class="sc-val sc-text" :title="weekly.best_hero">{{ weekly.best_hero }}</span>
-                  <span class="sc-lbl">Топ</span>
-                </div>
-              </div>
-
-              <div class="stat-card streak" v-if="weekly.streak_wins > 1">
-                <span class="sc-icon">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
-                    />
-                  </svg>
-                </span>
-                <div class="sc-body">
-                  <span class="sc-val">{{ weekly.streak_wins }}</span>
-                  <span class="sc-lbl">Серия</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Дни недели -->
-          <div class="heat-block">
-            <div class="heat-row">
-              <div
-                v-for="day in weekDays"
-                :key="day.date"
-                class="heat-day"
-                :title="dayTitle(day)"
-              >
-                <span
-                  class="hcell"
-                  :class="dayState(day)"
-                  :style="{ '--k': day.level }"
-                >{{ day.matches || '' }}</span>
-                <span class="heat-label">{{ day.short }}</span>
-              </div>
-            </div>
-            <div class="heat-scale">
-              <span class="hs-item"><i class="hs-dot win" />больше побед</span>
-              <span class="hs-item"><i class="hs-dot mix" />поровну</span>
-              <span class="hs-item"><i class="hs-dot loss" />больше поражений</span>
             </div>
           </div>
         </template>
@@ -740,16 +759,16 @@ onMounted(() => {
   animation: fadeInUp 0.25s var(--ease) both;
 }
 
-/* —— Hero: профиль | неделя —— */
+/* —— Hero: профиль | неделя (одна высота) —— */
 .hero {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.3fr);
-  gap: 20px 28px;
-  padding: 18px 20px !important;
-  align-items: start;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(400px, 1.5fr);
+  gap: 20px 24px;
+  padding: 16px 20px !important;
+  align-items: stretch;
   scroll-margin-top: 72px;
 }
-@media (max-width: 960px) {
+@media (max-width: 1100px) {
   .hero {
     grid-template-columns: 1fr;
   }
@@ -878,10 +897,12 @@ onMounted(() => {
 /* Правая колонка — неделя */
 .hero-right {
   min-width: 0;
-  padding-left: 24px;
+  display: flex;
+  flex-direction: column;
+  padding-left: 22px;
   border-left: 1px solid var(--border-color);
 }
-@media (max-width: 960px) {
+@media (max-width: 1100px) {
   .hero-right {
     padding-left: 0;
     border-left: none;
@@ -893,19 +914,19 @@ onMounted(() => {
 .week-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 .week-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .week-ico {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: var(--text-secondary);
   stroke-width: 1.8;
@@ -921,16 +942,15 @@ onMounted(() => {
   color: var(--text-primary);
 }
 .week-period {
-  margin: 2px 0 0;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
 .weekly-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .wtab {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: transparent;
@@ -945,11 +965,20 @@ onMounted(() => {
   background: var(--accent-dim);
 }
 
-.week-main {
-  display: flex;
-  align-items: flex-start;
-  gap: 20px;
-  flex-wrap: wrap;
+/* Основное тело: кольцо | (карточки + дни) */
+.week-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+  flex: 1;
+}
+@media (max-width: 640px) {
+  .week-body {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .week-side { width: 100%; }
 }
 
 /* —— Кольцо винрейта (SVG) —— */
@@ -958,12 +987,11 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
 }
 .ring {
   position: relative;
-  width: 118px;
-  height: 118px;
+  width: 100px;
+  height: 100px;
 }
 .ring-svg {
   display: block;
@@ -976,9 +1004,7 @@ onMounted(() => {
   fill: none;
   stroke-width: 9;
 }
-.ring-track {
-  stroke: var(--bg-sunken);
-}
+.ring-track { stroke: var(--bg-sunken); }
 .ring-track.loss {
   stroke: var(--danger);
   opacity: 0.85;
@@ -999,7 +1025,7 @@ onMounted(() => {
   pointer-events: none;
 }
 .ring-pct {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 800;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -1008,38 +1034,29 @@ onMounted(() => {
   color: var(--text-primary);
 }
 .ring-pct small {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   margin-left: 1px;
   color: var(--text-secondary);
 }
 .ring-sub {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
 }
-.ring-meta {
-  display: flex;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-.ring-meta .w { color: var(--success); }
-.ring-meta .l { color: var(--danger); }
-.ring-meta .mute { color: var(--text-muted); }
 
 .form-row {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 3px;
-  max-width: 130px;
+  max-width: 112px;
 }
 .fp {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 5px;
   font-size: 9px;
   font-weight: 800;
@@ -1056,20 +1073,26 @@ onMounted(() => {
   color: var(--danger);
 }
 
-/* —— Карточки статистики —— */
+/* —— Правая часть —— */
+.week-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Карточки (компактные) */
 .week-panels {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 10px;
-  flex: 1;
-  min-width: 200px;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 8px;
 }
 .stat-card {
   --c: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 9px 11px;
   min-width: 0;
   background: var(--bg-sunken);
   border: 1px solid var(--border-color);
@@ -1077,12 +1100,11 @@ onMounted(() => {
   position: relative;
   overflow: hidden;
 }
-/* тонкая цветная линия снизу */
 .stat-card::after {
   content: '';
   position: absolute;
-  left: 14px;
-  right: 14px;
+  left: 11px;
+  right: 11px;
   bottom: 0;
   height: 2px;
   border-radius: 2px;
@@ -1095,8 +1117,8 @@ onMounted(() => {
 .stat-card.streak { --c: var(--accent); }
 
 .sc-icon {
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1106,8 +1128,8 @@ onMounted(() => {
   border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
 }
 .sc-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   fill: none;
   stroke: var(--c);
   stroke-width: 1.9;
@@ -1117,11 +1139,11 @@ onMounted(() => {
 .sc-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 .sc-val {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   font-family: var(--font-mono);
   line-height: 1.1;
@@ -1129,7 +1151,7 @@ onMounted(() => {
 }
 .sc-val.sc-text {
   font-family: var(--font);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
   overflow: hidden;
@@ -1137,7 +1159,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 .sc-lbl {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1145,31 +1167,30 @@ onMounted(() => {
 }
 
 /* —— Дни недели —— */
-.heat-block { margin-top: 18px; }
 .heat-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  gap: 6px;
 }
 .heat-day {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .hcell {
   --k: 0;
   --c: transparent;
   width: 100%;
-  max-width: 44px;
+  max-width: 34px;
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-color);
   background: var(--bg-sunken);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text-primary);
@@ -1182,38 +1203,56 @@ onMounted(() => {
 .hcell.mix {
   background: color-mix(in srgb, var(--c) calc(14% + var(--k) * 9%), transparent);
   border-color: color-mix(in srgb, var(--c) calc(35% + var(--k) * 10%), transparent);
-  box-shadow: 0 0 calc(var(--k) * 5px) color-mix(in srgb, var(--c) 45%, transparent);
+  box-shadow: 0 0 calc(var(--k) * 4px) color-mix(in srgb, var(--c) 45%, transparent);
 }
 .hcell.win { --c: var(--success); }
 .hcell.loss { --c: var(--danger); }
 .hcell.mix { --c: var(--accent); }
 .heat-day:hover .hcell { transform: translateY(-2px); }
 .heat-label {
-  font-size: 10px;
+  font-size: 9px;
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
 
-/* легенда */
+/* Низ: инсайты слева, легенда справа */
+.heat-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.insights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.ins b {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
 .heat-scale {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 12px;
-  font-size: 10px;
-  color: var(--text-muted);
+  gap: 10px;
 }
 .hs-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  font-family: var(--font-mono);
 }
 .hs-dot {
   display: block;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex: none;
 }
@@ -1402,7 +1441,5 @@ onMounted(() => {
   .games-table-card { overflow-x: auto; }
   .games-table { min-width: 480px; }
   .gh-bar { max-width: none; }
-  .week-main { justify-content: center; }
-  .week-panels { min-width: 100%; }
 }
 </style>
