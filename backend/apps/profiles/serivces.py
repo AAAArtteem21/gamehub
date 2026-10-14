@@ -1047,7 +1047,7 @@ class ProfileSyncService:
         except Exception:
             pass
 
-    def _sync_opendota(self):
+        def _sync_opendota(self):
         client = OpenDotaClient()
         wl = client.get_win_loss(self.account.external_id)
         player = client.get_player(self.account.external_id)
@@ -1067,15 +1067,21 @@ class ProfileSyncService:
 
         top_heroes = sorted(heroes_raw, key=lambda h: h.get("games", 0), reverse=True)[:5]
         top_heroes_data = [
-            {"name": hero_names.get(h["hero_id"], f"Hero {h['hero_id']}"), "games": h.get("games", 0),
-            "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0}
-            for h in top_heroes if h.get("games", 0) > 0
+            {
+                "name": hero_names.get(h["hero_id"], f"Hero {h['hero_id']}"),
+                "games": h.get("games", 0),
+                "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0,
+            }
+            for h in top_heroes
+            if h.get("games", 0) > 0
         ]
 
-        # параллельно тянем детали всех матчей разом, вместо по одному
         details_by_match = {}
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(client.get_match_details, m["match_id"]): m["match_id"] for m in recent_matches}
+            futures = {
+                executor.submit(client.get_match_details, m["match_id"]): m["match_id"]
+                for m in recent_matches
+            }
             try:
                 for future in as_completed(futures, timeout=25):
                     match_id = futures[future]
@@ -1084,8 +1090,6 @@ class ProfileSyncService:
                     except Exception:
                         details_by_match[match_id] = None
             except TimeoutError:
-                # общий таймаут вышел раньше, чем все успели — для недошедших просто ставим None,
-                # а не роняем всю синхронизацию из-за пары медленных матчей
                 for match_id in futures.values():
                     if match_id not in details_by_match:
                         details_by_match[match_id] = None
@@ -1096,7 +1100,9 @@ class ProfileSyncService:
 
         for m in recent_matches:
             is_radiant = m.get("player_slot", 0) < 128
-            won = (is_radiant and m.get("radiant_win")) or (not is_radiant and not m.get("radiant_win"))
+            won = (is_radiant and m.get("radiant_win")) or (
+                not is_radiant and not m.get("radiant_win")
+            )
             hero = hero_names.get(m.get("hero_id"), "?")
             kda = f"{m.get('kills', 0)}/{m.get('deaths', 0)}/{m.get('assists', 0)}"
 
@@ -1110,21 +1116,36 @@ class ProfileSyncService:
             detail = details_by_match.get(m["match_id"])
             if detail:
                 try:
-                    my_slot = next(p for p in detail.get("players", []) if p.get("player_slot") == m.get("player_slot"))
-                    role_key = "Roaming Support" if my_slot.get("is_roaming") else role_labels.get(my_slot.get("lane_role"))
+                    my_slot = next(
+                        p
+                        for p in detail.get("players", [])
+                        if p.get("player_slot") == m.get("player_slot")
+                    )
+                    role_key = (
+                        "Roaming Support"
+                        if my_slot.get("is_roaming")
+                        else role_labels.get(my_slot.get("lane_role"))
+                    )
                     if role_key:
                         role_counter[role_key] = role_counter.get(role_key, 0) + 1
                     gpm = my_slot.get("gold_per_min")
                     xpm = my_slot.get("xp_per_min")
-                    if gpm is not None: gpm_list.append(gpm)
-                    if xpm is not None: xpm_list.append(xpm)
+                    if gpm is not None:
+                        gpm_list.append(gpm)
+                    if xpm is not None:
+                        xpm_list.append(xpm)
                     cs = (my_slot.get("last_hits") or 0) + (my_slot.get("denies") or 0)
                     hero_damage = my_slot.get("hero_damage")
                     solo = my_slot.get("party_size") == 1
 
                     participants = [
-                        {"account_id": p.get("account_id"), "hero": hero_names.get(p.get("hero_id"), "?"), "is_radiant": p.get("player_slot", 0) < 128}
-                        for p in detail.get("players", []) if p.get("account_id")
+                        {
+                            "account_id": p.get("account_id"),
+                            "hero": hero_names.get(p.get("hero_id"), "?"),
+                            "is_radiant": p.get("player_slot", 0) < 128,
+                        }
+                        for p in detail.get("players", [])
+                        if p.get("account_id")
                     ]
 
                     items = _extract_items_with_timing(my_slot, item_names)
@@ -1137,7 +1158,9 @@ class ProfileSyncService:
                 played_at = datetime.fromtimestamp(m["start_time"]).strftime("%d.%m.%Y")
 
             match_history.append({
-                "won": won, "title": hero, "subtitle": kda,
+                "won": won,
+                "title": hero,
+                "subtitle": kda,
                 "match_id": m["match_id"],
                 "duration": f"{round(m.get('duration', 0) / 60)} мин",
                 "played_at": played_at,
@@ -1157,17 +1180,42 @@ class ProfileSyncService:
         primary_role = max(role_counter, key=role_counter.get) if role_counter else None
         avg_gpm = round(sum(gpm_list) / len(gpm_list)) if gpm_list else None
         avg_xpm = round(sum(xpm_list) / len(xpm_list)) if xpm_list else None
-        mmr_estimate = player.get("mmr_estimate", {}).get("estimate")
+        mmr_estimate = (player.get("mmr_estimate") or {}).get("estimate")
+
+        profile_data = (player.get("profile") or {}) if isinstance(player, dict) else {}
+        persona = profile_data.get("personaname")
+        avatar = profile_data.get("avatarfull") or profile_data.get("avatar")
 
         self.account.extra_stats = {
-            "total_matches": total_matches, "wins": wins, "losses": losses, "winrate": winrate,
-            "top_heroes": top_heroes_data, "mmr_estimate": mmr_estimate, "rank_tier": player.get("rank_tier"),
-            "primary_role": primary_role, "avg_gpm": avg_gpm, "avg_xpm": avg_xpm,
+            "matches": total_matches,
+            "total_matches": total_matches,
+            "wins": wins,
+            "losses": losses,
+            "winrate": winrate,
+            "top_heroes": top_heroes_data,
+            "mmr_estimate": mmr_estimate,
+            "rank_tier": player.get("rank_tier") if isinstance(player, dict) else None,
+            "primary_role": primary_role,
+            "avg_gpm": avg_gpm,
+            "avg_xpm": avg_xpm,
             "match_history": match_history,
         }
         self.account.skill_rating = mmr_estimate
         self.account.game_label = "Dota 2"
-        self.account.save(update_fields=["extra_stats", "skill_rating", "game_label"])
+        update_fields = ["extra_stats", "skill_rating", "game_label"]
+        if persona:
+            self.account.nickname = persona
+            update_fields.append("nickname")
+        if avatar:
+            self.account.avatar = avatar
+            update_fields.append("avatar")
+        self.account.save(update_fields=update_fields)
+
+        try:
+            from django.core.cache import cache
+            cache.delete(f"game_accounts:{self.account.user_id}")
+        except Exception:
+            pass
 
 
     def _sync_faceit(self):

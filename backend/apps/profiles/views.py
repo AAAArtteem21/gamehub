@@ -1161,6 +1161,187 @@ class GuestProfileView(APIView):
             "match_history": match_history,
         })
 
+    def _related_games_for_steam32(self, steam32: str, current: str = "dota2"):
+        """Чипы других игр для guest (Dota / Deadlock / Faceit / GH)."""
+        from django.core.cache import cache
+
+        steam32 = str(steam32 or "").strip()
+        if not steam32.isdigit():
+            return []
+
+        cache_key = f"related_steam32:{steam32}:v1"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return [r for r in cached if r.get("game") != current]
+
+        related = []
+
+        related.append({
+            "game": "dota2",
+            "label": "Dota 2",
+            "external_id": steam32,
+            "path": f"/players/guest/dota2/{steam32}",
+        })
+        related.append({
+            "game": "deadlock",
+            "label": "Deadlock",
+            "external_id": steam32,
+            "path": f"/players/guest/deadlock/{steam32}",
+        })
+
+        try:
+            steam64 = str(int(steam32) + 76561197960265728)
+            from .integrations.faceit_client import FaceitClient
+            p = FaceitClient().get_player_by_steam_id(steam64)
+            if p and (p.get("nickname") or p.get("player_id")):
+                nick = p.get("nickname") or p.get("player_id")
+                related.append({
+                    "game": "faceit",
+                    "label": "Faceit",
+                    "external_id": nick,
+                    "path": f"/players/guest/faceit/{nick}",
+                })
+        except Exception:
+            pass
+
+        ga = (
+            GameAccount.objects.filter(platform="opendota", external_id=steam32)
+            .select_related("user")
+            .first()
+        )
+        if ga and ga.user_id:
+            related.insert(0, {
+                "game": "gamehub",
+                "label": "Профиль GameEyes",
+                "external_id": str(ga.user_id),
+                "path": f"/players/{ga.user_id}",
+            })
+
+        cache.set(cache_key, related, 600)
+        return [r for r in related if r.get("game") != current]
+
+    def _dota_guest(self, external_id):
+        from datetime import datetime
+        from .integrations.opendota_client import OpenDotaClient
+        from .serivces import build_display_stats  # если services.py — from .services import ...
+
+        account_id = str(external_id or "").strip()
+        if account_id.startswith("7656119"):
+            try:
+                account_id = str(int(account_id) & 0xFFFFFFFF)
+            except (TypeError, ValueError):
+                pass
+
+        client = OpenDotaClient()
+        try:
+            player = client.get_player(account_id)
+            wl = client.get_win_loss(account_id)
+        except Exception:
+            return Response(
+                {"detail": "Игрок не найден или профиль полностью закрыт"},
+                status=404,
+            )
+
+        profile_data = player.get("profile", {}) or {}
+        is_public = bool(profile_data.get("personaname"))
+
+        wins = wl.get("win", 0) or 0
+        losses = wl.get("lose", 0) or 0
+        total = wins + losses
+        winrate = round(wins / total * 100, 1) if total else 0
+
+        heroes_data = []
+        hero_names = {}
+        try:
+            heroes_raw = client.get_heroes(account_id)
+            hero_names = client.get_hero_names()
+            top = sorted(heroes_raw, key=lambda h: h.get("games", 0), reverse=True)[:5]
+            heroes_data = [
+                {
+                    "name": hero_names.get(h["hero_id"], "?"),
+                    "games": h.get("games", 0),
+                    "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0,
+                }
+                for h in top
+                if h.get("games", 0) > 0
+            ]
+        except Exception:
+            pass
+
+        match_history = []
+        try:
+            if not hero_names:
+                hero_names = client.get_hero_names()
+            recent = client.get_recent_matches(account_id, limit=20)
+            for m in recent:
+                is_radiant = m.get("player_slot", 0) < 128
+                won = (is_radiant and m.get("radiant_win")) or (
+                    not is_radiant and not m.get("radiant_win")
+                )
+                played_at = None
+                if m.get("start_time"):
+                    try:
+                        played_at = datetime.fromtimestamp(m["start_time"]).strftime("%d.%m.%Y")
+                    except (OSError, ValueError, OverflowError):
+                        played_at = None
+                match_history.append({
+                    "won": won,
+                    "title": hero_names.get(m.get("hero_id"), "?"),
+                    "subtitle": f"{m.get('kills', 0)}/{m.get('deaths', 0)}/{m.get('assists', 0)}",
+                    "match_id": m.get("match_id"),
+                    "duration": f"{round(m.get('duration', 0) / 60)} мин" if m.get("duration") else None,
+                    "played_at": played_at,
+                })
+        except Exception:
+            pass
+
+        mmr = (player.get("mmr_estimate") or {}).get("estimate")
+        extra = {
+            "matches": total,
+            "total_matches": total,
+            "wins": wins,
+            "losses": losses,
+            "winrate": winrate,
+            "mmr_estimate": mmr,
+            "rank_tier": player.get("rank_tier"),
+            "top_heroes": heroes_data,
+            "match_history": match_history,
+        }
+
+        gh_account = GameAccount.objects.filter(
+            platform="opendota", external_id=str(account_id)
+        ).select_related("user").first()
+
+        related = self._related_games_for_steam32(account_id, current="dota2")
+        is_empty = wins == 0 and losses == 0 and not match_history
+
+        return Response({
+            "platform": "opendota",
+            "game": "dota2",
+            "external_id": account_id,
+            "is_public": is_public,
+            "display_name": profile_data.get("personaname") if is_public else None,
+            "avatar_url": profile_data.get("avatarfull") if is_public else None,
+            "is_gamehub_user": bool(gh_account),
+            "gamehub_user_id": gh_account.user_id if gh_account else None,
+            "wins": wins,
+            "losses": losses,
+            "matches": total,
+            "winrate": winrate,
+            "mmr_estimate": mmr,
+            "rank_tier": player.get("rank_tier"),
+            "top_heroes": heroes_data,
+            "match_history": match_history,
+            "display_stats": build_display_stats("opendota", extra),
+            "related_games": related,
+            "is_empty": is_empty,
+            "detail_hint": (
+                "Статистика недоступна: профиль скрыт или нет матчей"
+                if is_empty
+                else None
+            ),
+        })
+
     def _valorant_guest(self, riot_id):
         from urllib.parse import unquote
         from collections import Counter

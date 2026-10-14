@@ -19,7 +19,6 @@ const isFav = ref(false)
 const game = computed(() => String(route.params.game || 'dota2').toLowerCase())
 const externalId = computed(() => String(route.params.externalId || ''))
 
-/** platform для UniversalStatsCard / favorites */
 const platform = computed(() => {
   if (game.value === 'dota2' || game.value === 'opendota') return 'opendota'
   return game.value
@@ -32,10 +31,8 @@ const sourceLabel = computed(() => {
   return 'Данные из открытого источника (OpenDota)'
 })
 
-/** Есть готовая карточка как у себя */
 const hasDisplayStats = computed(() => !!profile.value?.display_stats)
 
-/** Fallback-метрики только если display_stats нет (старый dota/valorant ответ) */
 const fallbackWinrate = computed(() => {
   if (!profile.value) return null
   const w = profile.value.wins || 0
@@ -52,12 +49,7 @@ const canExpand = computed(() =>
   (profile.value?.match_history || []).length > historyLimit.value
 )
 
-/* =====================================================================
-   НЕДЕЛЯ (та же статистика, что на своём профиле)
-   Если бэк отдаёт profile.weekly в формате me/weekly-report/ — берём его.
-   Иначе считаем из match_history за последние 7 дней.
-   ===================================================================== */
-
+/* ===== Неделя ===== */
 const RING_R = 42
 const RING_C = 2 * Math.PI * RING_R
 
@@ -80,7 +72,6 @@ function last7Dates() {
   return out
 }
 
-/** Парсит дату матча: dd.mm.yyyy [hh:mm], ISO, unix-секунды/миллисекунды */
 function parsePlayedAt(v) {
   if (v == null || v === '') return null
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v
@@ -111,11 +102,12 @@ function parseWon(m) {
   return null
 }
 
-/** Матчи в нормализованном виде */
 const historyRows = computed(() => {
   const p = profile.value
   if (!p) return []
-  const src = p.match_history?.length ? p.match_history : p.display_stats?.match_history || []
+  const src = p.match_history?.length
+    ? p.match_history
+    : p.display_stats?.match_history || []
   return src
     .map((m) => ({
       won: parseWon(m),
@@ -128,8 +120,6 @@ const historyRows = computed(() => {
 const weekly = computed(() => {
   const p = profile.value
   if (!p) return null
-
-  // бэк уже отдал готовую неделю
   if (p.weekly && typeof p.weekly === 'object') return p.weekly
 
   const rows = historyRows.value
@@ -152,7 +142,6 @@ const weekly = computed(() => {
   const wins = weekRows.filter((r) => r.won).length
   const losses = weekRows.length - wins
 
-  // топ — самый частый победный заголовок (герой/агент/карта)
   const winCount = {}
   for (const r of weekRows) {
     if (r.won && r.title) winCount[r.title] = (winCount[r.title] || 0) + 1
@@ -166,7 +155,6 @@ const weekly = computed(() => {
     }
   }
 
-  // текущая серия побед (с самого свежего матча)
   let streak = 0
   for (let i = weekRows.length - 1; i >= 0; i--) {
     if (weekRows[i].won) streak++
@@ -207,7 +195,6 @@ const donutWin = computed(() => {
 
 const winArc = computed(() => (donutWin.value / 100) * RING_C)
 
-/** Нормализованная форма W/L */
 const formList = computed(() => {
   const raw = weekly.value?.recent_form || weekly.value?.form || []
   if (raw.length) {
@@ -292,7 +279,6 @@ function intensity(matches) {
   return 4
 }
 
-/** Цвет дня: win / loss / mix / none */
 function dayState(day) {
   if (!day.matches) return 'none'
   if (day.wins > day.losses) return 'win'
@@ -322,8 +308,6 @@ function dayTitle(day) {
   if (!day.matches) return `${day.label}: нет матчей`
   return `${day.label}: ${day.wins}W ${day.losses}L (${day.matches})`
 }
-
-/* ===================================================================== */
 
 function gPlatform() {
   return platform.value
@@ -398,6 +382,21 @@ function goCompare() {
   })
 }
 
+function openRelated(g) {
+  if (g?.path) {
+    router.push(g.path)
+    return
+  }
+  if (g?.game === 'gamehub' && g.external_id) {
+    router.push(`/players/${g.external_id}`)
+    return
+  }
+  const gameName = g?.game || 'dota2'
+  const id = encodeURIComponent(g?.external_id || '')
+  if (!id) return
+  router.push(`/players/guest/${gameName}/${id}`)
+}
+
 const isProfileEmpty = computed(() => {
   if (!profile.value) return false
   if (profile.value.is_empty) return true
@@ -406,10 +405,7 @@ const isProfileEmpty = computed(() => {
   const l = profile.value.losses || 0
   const hist = profile.value.match_history || []
   const ds = profile.value.display_stats
-  const dsMatches = ds?.metrics?.length
-  // 0/0 и нет истории и нет нормальной карточки
   if (w === 0 && l === 0 && !hist.length) {
-    // deadlock с rank тоже может быть «пустым» по WL — не считаем empty если есть history в display_stats
     if (ds?.match_history?.length) return false
     if (game.value === 'deadlock' && (ds || profile.value.tier)) return false
     return true
@@ -451,13 +447,12 @@ watch(() => [route.params.game, route.params.externalId], () => load())
 
     <template v-else-if="profile">
       <div class="profile-header hero-grid card" :class="{ single: !weekly }">
-        <!-- Слева: профиль -->
         <div class="header-left">
           <div
             class="avatar-big"
-            :style="profile.avatar_url
-              ? { backgroundImage: `url(${profile.avatar_url})` }
-              : {}"
+            :style="
+              profile.avatar_url ? { backgroundImage: `url(${profile.avatar_url})` } : {}
+            "
           >
             <span v-if="!profile.avatar_url">?</span>
           </div>
@@ -466,7 +461,9 @@ watch(() => [route.params.game, route.params.externalId], () => load())
             <h1 v-else class="anon-name">Скрытый профиль</h1>
             <span class="external-badge">{{ sourceLabel }}</span>
             <div class="header-actions">
-              <button type="button" class="btn-secondary" @click="router.back()">← Назад</button>
+              <button type="button" class="btn-secondary" @click="router.back()">
+                ← Назад
+              </button>
               <button type="button" class="btn-secondary" @click="toggleFav">
                 {{ isFav ? '★ В избранном' : '☆ В избранное' }}
               </button>
@@ -485,7 +482,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
           </div>
         </div>
 
-        <!-- Справа: неделя -->
         <div class="hero-right" v-if="weekly">
           <div class="week-top">
             <div class="week-title">
@@ -500,7 +496,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
 
           <template v-if="weeklyTotal > 0">
             <div class="week-body">
-              <!-- Кольцо + форма -->
               <div class="ring-block">
                 <div class="ring">
                   <svg viewBox="0 0 100 100" class="ring-svg" aria-hidden="true">
@@ -535,7 +530,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
                 </div>
               </div>
 
-              <!-- Справа: карточки, под ними дни недели -->
               <div class="week-side">
                 <div class="week-panels">
                   <div class="stat-card win">
@@ -579,7 +573,9 @@ watch(() => [route.params.game, route.params.externalId], () => load())
                       </svg>
                     </span>
                     <div class="sc-body">
-                      <span class="sc-val sc-text" :title="weekly.best_hero">{{ weekly.best_hero }}</span>
+                      <span class="sc-val sc-text" :title="weekly.best_hero">{{
+                        weekly.best_hero
+                      }}</span>
                       <span class="sc-lbl">Топ</span>
                     </div>
                   </div>
@@ -639,38 +635,32 @@ watch(() => [route.params.game, route.params.externalId], () => load())
             </div>
           </template>
 
-          <div v-else class="week-empty">
-            Нет матчей за неделю.
-          </div>
+          <div v-else class="week-empty">Нет матчей за неделю.</div>
         </div>
       </div>
 
       <div class="related-row" v-if="profile.related_games?.length">
         <span class="related-label">Другие игры</span>
-        <router-link
-          v-for="g in profile.related_games"
-          :key="g.path"
-          :to="g.path"
+        <button
+          v-for="(g, i) in profile.related_games"
+          :key="(g.path || g.game || '') + '-' + i"
+          type="button"
           class="btn-secondary"
-        >{{ g.label }}</router-link>
+          @click="openRelated(g)"
+        >
+          {{ g.label }}
+        </button>
       </div>
 
-      <div
-        v-if="isProfileEmpty"
-        class="card empty-hint-card"
-      >
+      <div v-if="isProfileEmpty" class="card empty-hint-card">
         Статистика недоступна: профиль скрыт в Steam/OpenDota, нет публичных матчей
         или игрок не найден. Это не ошибка сайта.
       </div>
 
       <div class="card stats-card" v-else-if="hasDisplayStats">
-        <UniversalStatsCard
-          :stats="profile.display_stats"
-          :platform="platform"
-        />
+        <UniversalStatsCard :stats="profile.display_stats" :platform="platform" />
       </div>
 
-      <!-- Fallback, если бэк ещё не отдал display_stats -->
       <div class="card" v-else>
         <div class="stats-row">
           <div class="stat-box" v-if="profile.wins != null">
@@ -693,7 +683,10 @@ watch(() => [route.params.game, route.params.externalId], () => load())
             <span class="stat-value accent">{{ profile.tier }}</span>
             <span class="stat-label">ранг</span>
           </div>
-          <div class="stat-box" v-if="game === 'valorant' && profile.rr != null && profile.rr !== ''">
+          <div
+            class="stat-box"
+            v-if="game === 'valorant' && profile.rr != null && profile.rr !== ''"
+          >
             <span class="stat-value accent">{{ profile.rr }}</span>
             <span class="stat-label">RR</span>
           </div>
@@ -720,14 +713,17 @@ watch(() => [route.params.game, route.params.externalId], () => load())
           </div>
         </div>
 
-        <!-- История только в fallback: при display_stats её рисует UniversalStatsCard -->
         <template v-if="profile.match_history?.length">
           <h4 class="section-title">История матчей</h4>
           <div
             v-for="(m, i) in visibleHistory"
             :key="m.match_id || i"
             class="match-row"
-            :class="{ win: m.won === true, loss: m.won === false, clickable: !!m.match_id }"
+            :class="{
+              win: m.won === true,
+              loss: m.won === false,
+              clickable: !!m.match_id,
+            }"
             @click="openMatch(m)"
           >
             <span class="match-result">{{ m.won ? 'W' : 'L' }}</span>
@@ -788,7 +784,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   animation: fadeInUp 0.25s var(--ease) both;
 }
 
-/* —— Шапка: профиль | неделя (одна высота) —— */
 .profile-header {
   padding: 16px 20px !important;
 }
@@ -879,7 +874,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   cursor: pointer;
 }
 
-/* —— Правая колонка: неделя —— */
 .hero-right {
   min-width: 0;
   display: flex;
@@ -944,10 +938,11 @@ watch(() => [route.params.game, route.params.externalId], () => load())
     grid-template-columns: 1fr;
     justify-items: center;
   }
-  .week-side { width: 100%; }
+  .week-side {
+    width: 100%;
+  }
 }
 
-/* Кольцо винрейта (SVG) */
 .ring-block {
   display: flex;
   flex-direction: column;
@@ -970,7 +965,9 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   fill: none;
   stroke-width: 9;
 }
-.ring-track { stroke: var(--bg-sunken); }
+.ring-track {
+  stroke: var(--bg-sunken);
+}
 .ring-track.loss {
   stroke: var(--danger);
   opacity: 0.85;
@@ -1046,7 +1043,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   min-width: 0;
 }
 
-/* Карточки */
 .week-panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
@@ -1076,10 +1072,18 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   background: linear-gradient(90deg, var(--c), transparent);
   opacity: 0.7;
 }
-.stat-card.win { --c: var(--success); }
-.stat-card.loss { --c: var(--danger); }
-.stat-card.top { --c: var(--accent); }
-.stat-card.streak { --c: var(--accent); }
+.stat-card.win {
+  --c: var(--success);
+}
+.stat-card.loss {
+  --c: var(--danger);
+}
+.stat-card.top {
+  --c: var(--accent);
+}
+.stat-card.streak {
+  --c: var(--accent);
+}
 
 .sc-icon {
   width: 30px;
@@ -1131,7 +1135,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   color: var(--text-muted);
 }
 
-/* Дни недели */
 .heat-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -1170,10 +1173,18 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   border-color: color-mix(in srgb, var(--c) calc(35% + var(--k) * 10%), transparent);
   box-shadow: 0 0 calc(var(--k) * 4px) color-mix(in srgb, var(--c) 45%, transparent);
 }
-.hcell.win { --c: var(--success); }
-.hcell.loss { --c: var(--danger); }
-.hcell.mix { --c: var(--accent); }
-.heat-day:hover .hcell { transform: translateY(-2px); }
+.hcell.win {
+  --c: var(--success);
+}
+.hcell.loss {
+  --c: var(--danger);
+}
+.hcell.mix {
+  --c: var(--accent);
+}
+.heat-day:hover .hcell {
+  transform: translateY(-2px);
+}
 .heat-label {
   font-size: 9px;
   font-family: var(--font-mono);
@@ -1220,9 +1231,15 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   border-radius: 50%;
   flex: none;
 }
-.hs-dot.win { background: var(--success); }
-.hs-dot.loss { background: var(--danger); }
-.hs-dot.mix { background: var(--accent); }
+.hs-dot.win {
+  background: var(--success);
+}
+.hs-dot.loss {
+  background: var(--danger);
+}
+.hs-dot.mix {
+  background: var(--accent);
+}
 
 .week-empty {
   font-size: 13px;
@@ -1231,7 +1248,6 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   line-height: 1.4;
 }
 
-/* —— Остальное —— */
 .stats-card {
   padding: 16px 18px !important;
 }
@@ -1257,9 +1273,15 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   font-weight: 800;
   font-family: var(--font-mono);
 }
-.stat-value.win { color: var(--success); }
-.stat-value.loss { color: var(--danger); }
-.stat-value.accent { color: var(--accent); }
+.stat-value.win {
+  color: var(--success);
+}
+.stat-value.loss {
+  color: var(--danger);
+}
+.stat-value.accent {
+  color: var(--accent);
+}
 .stat-label {
   font-size: 10px;
   color: var(--text-muted);
@@ -1283,11 +1305,24 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
 }
-.hero-row:last-child { border-bottom: none; }
-.hero-name { flex: 1; font-weight: 600; }
-.hero-games { color: var(--text-secondary); font-size: 12px; }
-.hero-winrate { font-weight: 700; color: var(--danger); }
-.hero-winrate.good { color: var(--success); }
+.hero-row:last-child {
+  border-bottom: none;
+}
+.hero-name {
+  flex: 1;
+  font-weight: 600;
+}
+.hero-games {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.hero-winrate {
+  font-weight: 700;
+  color: var(--danger);
+}
+.hero-winrate.good {
+  color: var(--success);
+}
 
 .match-row {
   display: flex;
@@ -1298,8 +1333,12 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   font-size: 13px;
   border-radius: 8px;
 }
-.match-row.clickable { cursor: pointer; }
-.match-row.clickable:hover { background: var(--bg-card-hover); }
+.match-row.clickable {
+  cursor: pointer;
+}
+.match-row.clickable:hover {
+  background: var(--bg-card-hover);
+}
 .match-result {
   width: 24px;
   height: 24px;
@@ -1325,13 +1364,21 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   flex-direction: column;
   min-width: 0;
 }
-.match-title { font-weight: 700; }
-.match-meta { font-size: 11px; color: var(--text-secondary); }
+.match-title {
+  font-weight: 700;
+}
+.match-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
 .match-kda {
   font-family: var(--font-mono);
   color: var(--text-secondary);
 }
-.match-chevron { color: var(--text-muted); font-size: 18px; }
+.match-chevron {
+  color: var(--text-muted);
+  font-size: 18px;
+}
 .show-more {
   width: 100%;
   margin-top: 8px;
@@ -1344,7 +1391,9 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   font-size: 13px;
   cursor: pointer;
 }
-.show-more:hover { border-color: var(--accent); }
+.show-more:hover {
+  border-color: var(--accent);
+}
 
 .related-row {
   display: flex;
@@ -1375,10 +1424,18 @@ watch(() => [route.params.game, route.params.externalId], () => load())
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
 }
-.error-state { color: var(--danger); }
+.error-state {
+  color: var(--danger);
+}
 
 @media (max-width: 900px) {
-  .header-left { flex-direction: column; align-items: stretch; }
-  .avatar-big { width: 56px; height: 56px; }
+  .header-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .avatar-big {
+    width: 56px;
+    height: 56px;
+  }
 }
 </style>
