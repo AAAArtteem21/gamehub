@@ -781,7 +781,7 @@ class WeeklyReportView(APIView):
         hero_counter = Counter()
         streak_wins = 0
         counting_streak = True
-        all_week_matches = []
+        all_week_matches = []  # (date, won, title)
 
         for acc in accounts:
             meta = WEEKLY_GAMES.get(acc.platform)
@@ -816,6 +816,29 @@ class WeeklyReportView(APIView):
             else:
                 counting_streak = False
 
+        # daily buckets
+        daily_map = {}
+        cur = week_start
+        while cur <= today:
+            daily_map[cur.isoformat()] = {"date": cur.isoformat(), "wins": 0, "losses": 0, "matches": 0}
+            cur += timedelta(days=1)
+        for d, won, _ in all_week_matches:
+            key = d.isoformat()
+            if key not in daily_map:
+                continue
+            if won is True:
+                daily_map[key]["wins"] += 1
+            elif won is False:
+                daily_map[key]["losses"] += 1
+            daily_map[key]["matches"] = daily_map[key]["wins"] + daily_map[key]["losses"]
+
+        recent_form = []
+        for _, won, _ in all_week_matches[:20]:
+            if won is True:
+                recent_form.append("W")
+            elif won is False:
+                recent_form.append("L")
+
         best = hero_counter.most_common(1)
         best_hero = best[0][0] if best else None
 
@@ -827,8 +850,9 @@ class WeeklyReportView(APIView):
             "losses": losses,
             "best_hero": best_hero,
             "streak_wins": streak_wins,
+            "recent_form": recent_form,
+            "daily": list(daily_map.values()),
         })
-
 
 class TeammateRecommendationsView(APIView):
     permission_classes = [IsAuthenticated]
