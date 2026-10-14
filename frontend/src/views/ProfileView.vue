@@ -203,19 +203,12 @@ async function handleRemove(id) {
 function openMatch(matchId) {
   if (!matchId || !activeAccount.value) return
   const p = String(activeAccount.value.platform || '').toLowerCase()
-  if (p === 'valorant') {
-    openMatchGame.value = 'valorant'
-    openMatchId.value = matchId
-  } else if (p === 'opendota' || p === 'dota2') {
-    openMatchGame.value = 'dota2'
-    openMatchId.value = matchId
-  } else if (p === 'faceit') {
-    openMatchGame.value = 'faceit'
-    openMatchId.value = matchId
-  } else if (p === 'deadlock') {
-    openMatchGame.value = 'deadlock'
-    openMatchId.value = matchId
-  }
+  if (p === 'valorant') openMatchGame.value = 'valorant'
+  else if (p === 'faceit') openMatchGame.value = 'faceit'
+  else if (p === 'opendota' || p === 'dota2') openMatchGame.value = 'dota2'
+  else if (p === 'deadlock') openMatchGame.value = 'deadlock'
+  else return
+  openMatchId.value = matchId
 }
 
 function closeMatch() {
