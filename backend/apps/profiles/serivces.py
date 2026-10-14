@@ -1047,7 +1047,7 @@ class ProfileSyncService:
         except Exception:
             pass
 
-        def _sync_opendota(self):
+    def _sync_opendota(self):
         client = OpenDotaClient()
         wl = client.get_win_loss(self.account.external_id)
         player = client.get_player(self.account.external_id)
