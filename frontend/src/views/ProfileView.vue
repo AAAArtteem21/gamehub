@@ -76,26 +76,28 @@ const weeklyWinPct = computed(() => {
   return Math.round((weeklyWins.value / weeklyTotal.value) * 100)
 })
 
-/** Доля побед для conic-gradient (0–100) */
 const donutWin = computed(() => {
   if (!weeklyTotal.value) return 0
   return (weeklyWins.value / weeklyTotal.value) * 100
 })
 
+/** Нормализованная форма W/L */
 const formList = computed(() => {
   const raw = weekly.value?.recent_form || weekly.value?.form || []
-  return raw.map((f) => {
-    if (f === true || f === 'W' || f === 'w') return 'W'
-    if (f === false || f === 'L' || f === 'l') return 'L'
-    return String(f).toUpperCase().startsWith('W') ? 'W' : 'L'
-  })
+  if (raw.length) {
+    return raw.map((f) => {
+      if (f === true || f === 'W' || f === 'w') return 'W'
+      if (f === false || f === 'L' || f === 'l') return 'L'
+      return String(f).toUpperCase().startsWith('W') ? 'W' : 'L'
+    })
+  }
+  // нет form — синтетика из wins/losses (чтобы heatmap не был пустым)
+  const list = []
+  for (let i = 0; i < weeklyWins.value; i++) list.push('W')
+  for (let i = 0; i < weeklyLosses.value; i++) list.push('L')
+  return list
 })
 
-/**
- * Дни недели для heatmap.
- * Приоритет: weekly.daily [{ date, wins, losses, matches }]
- * Иначе — 7 дней от period / сегодня, матчи раскидываем по recent_form с конца.
- */
 const weekDays = computed(() => {
   const apiDays = weekly.value?.daily
   if (Array.isArray(apiDays) && apiDays.length) {
@@ -106,6 +108,7 @@ const weekDays = computed(() => {
       return {
         date: d.date,
         label: formatDayLabel(d.date),
+        short: formatDayShort(d.date),
         wins: w,
         losses: l,
         matches: m,
@@ -115,32 +118,31 @@ const weekDays = computed(() => {
   }
 
   const days = last7Dates()
-  const form = [...formList.value]
-  // раскладываем форму с конца по дням (грубая визуализация, пока нет daily с бэка)
+  const form = formList.value
   const buckets = days.map(() => ({ wins: 0, losses: 0 }))
-  let di = days.length - 1
-  for (let i = form.length - 1; i >= 0 && di >= 0; i--) {
-    if (form[i] === 'W') buckets[di].wins++
-    else buckets[di].losses++
-    // следующий матч — тот же день с вероятностью, иначе шаг назад
-    if (Math.random() > 0.55) di = Math.max(0, di - 1)
-  }
-  // детерминированнее: равномерно по дням с конца
-  const clean = days.map(() => ({ wins: 0, losses: 0 }))
-  let idx = days.length - 1
-  for (let i = form.length - 1; i >= 0; i--) {
-    if (form[i] === 'W') clean[idx].wins++
-    else clean[idx].losses++
-    idx = idx <= 0 ? days.length - 1 : idx - 1
+
+  // Катки с конца недели назад по дням (детерминированно)
+  if (form.length) {
+    let dayIdx = days.length - 1
+    for (let i = form.length - 1; i >= 0; i--) {
+      if (form[i] === 'W') buckets[dayIdx].wins++
+      else buckets[dayIdx].losses++
+      // несколько каток в день, потом шаг
+      const inDay = buckets[dayIdx].wins + buckets[dayIdx].losses
+      if (inDay >= 2 || i % 2 === 0) {
+        dayIdx = Math.max(0, dayIdx - 1)
+      }
+    }
   }
 
   return days.map((iso, i) => {
-    const w = clean[i].wins
-    const l = clean[i].losses
+    const w = buckets[i].wins
+    const l = buckets[i].losses
     const m = w + l
     return {
       date: iso,
       label: formatDayLabel(iso),
+      short: formatDayShort(iso),
       wins: w,
       losses: l,
       matches: m,
@@ -163,7 +165,10 @@ function last7Dates() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(end)
     d.setDate(end.getDate() - i)
-    out.push(d.toISOString().slice(0, 10))
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    out.push(`${y}-${m}-${day}`)
   }
   return out
 }
@@ -174,6 +179,15 @@ function formatDayLabel(iso) {
     return d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' })
   } catch {
     return iso
+  }
+}
+
+function formatDayShort(iso) {
+  try {
+    const d = new Date(iso + 'T12:00:00')
+    return String(d.getDate())
+  } catch {
+    return ''
   }
 }
 
@@ -361,170 +375,150 @@ onMounted(() => {
 
 <template>
   <div class="profile-page">
-    <div class="profile-header card">
-      <div
-        class="avatar-big"
-        :style="authStore.user?.avatar_url ? { backgroundImage: `url(${authStore.user.avatar_url})` } : {}"
-      ></div>
-      <div class="header-main">
-        <h1>{{ authStore.user?.display_name || authStore.user?.username }}</h1>
-        <p class="steam-id" v-if="authStore.user?.steam_id">
-          Steam ID: {{ authStore.user.steam_id }}
-        </p>
+    <!-- Шапка: слева профиль, справа неделя -->
+    <div class="hero card" id="weekly">
+      <div class="hero-left">
+        <div
+          class="avatar-big"
+          :style="authStore.user?.avatar_url ? { backgroundImage: `url(${authStore.user.avatar_url})` } : {}"
+        ></div>
+        <div class="header-main">
+          <h1>{{ authStore.user?.display_name || authStore.user?.username }}</h1>
+          <p class="steam-id" v-if="authStore.user?.steam_id">
+            Steam ID: {{ authStore.user.steam_id }}
+          </p>
 
-        <div class="gh-block" v-if="progress">
-          <div class="gh-row">
-            <span class="gh-lvl">GH {{ progress.level }}</span>
-            <div class="gh-bar"><i :style="{ width: (progress.pct || 0) + '%' }" /></div>
-            <span class="gh-xp">
-              {{ progress.xp_into_level ?? 0 }}/{{ progress.xp_per_level ?? 100 }} XP
-            </span>
-          </div>
-          <div class="gh-meta">
-            <span class="gh-tag" v-for="t in (progress.tags || [])" :key="t">{{ t }}</span>
-            <span class="gh-boost" v-if="progress.boost_credits">
-              Бусты: {{ progress.boost_credits }}
-            </span>
-          </div>
-          <div class="gh-ref" v-if="progress.referral_code">
-            <span>Твой код:</span>
-            <code class="ref-code" @click="copyRefCode" title="Скопировать">
-              {{ progress.referral_code }}
-            </code>
-          </div>
-          <div class="gh-ref-claim" v-if="!progress.has_referrer">
-            <input v-model="refCodeInput" placeholder="Код друга" maxlength="16" />
-            <button type="button" class="btn-ref" :disabled="refBusy" @click="claimReferral">
-              Активировать
-            </button>
+          <div class="gh-block" v-if="progress">
+            <div class="gh-row">
+              <span class="gh-lvl">GH {{ progress.level }}</span>
+              <div class="gh-bar"><i :style="{ width: (progress.pct || 0) + '%' }" /></div>
+              <span class="gh-xp">
+                {{ progress.xp_into_level ?? 0 }}/{{ progress.xp_per_level ?? 100 }} XP
+              </span>
+            </div>
+            <div class="gh-meta">
+              <span class="gh-tag" v-for="t in (progress.tags || [])" :key="t">{{ t }}</span>
+              <span class="gh-boost" v-if="progress.boost_credits">
+                Бусты: {{ progress.boost_credits }}
+              </span>
+            </div>
+            <div class="gh-ref" v-if="progress.referral_code">
+              <span>Твой код:</span>
+              <code class="ref-code" @click="copyRefCode" title="Скопировать">
+                {{ progress.referral_code }}
+              </code>
+            </div>
+            <div class="gh-ref-claim" v-if="!progress.has_referrer">
+              <input v-model="refCodeInput" placeholder="Код друга" maxlength="16" />
+              <button type="button" class="btn-ref" :disabled="refBusy" @click="claimReferral">
+                Активировать
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- ========== НЕДЕЛЯ ========== -->
-    <section id="weekly" class="card weekly-card">
-      <div class="weekly-head">
-        <div>
-          <h2 class="weekly-title">Эта неделя</h2>
-          <p class="weekly-period" v-if="weekly?.period">{{ weekly.period }}</p>
-          <p class="weekly-period" v-else>Последние 7 дней</p>
-        </div>
-        <div class="weekly-tabs" v-if="(weekly?.available_games || []).length">
-          <button
-            type="button"
-            class="wtab"
-            :class="{ active: weeklyGame === 'all' }"
-            @click="setWeeklyGame('all')"
-          >Все</button>
-          <button
-            v-for="g in weekly.available_games"
-            :key="g.value"
-            type="button"
-            class="wtab"
-            :class="{ active: weeklyGame === g.value }"
-            @click="setWeeklyGame(g.value)"
-          >{{ g.label }}</button>
-        </div>
-      </div>
-
-      <template v-if="weekly && weeklyTotal > 0">
-        <div class="weekly-body">
-          <!-- Кольцо -->
-          <div class="donut-wrap">
-            <div
-              class="donut"
-              :style="{
-                background: `conic-gradient(
-                  var(--success) 0 ${donutWin}%,
-                  var(--danger) ${donutWin}% 100%
-                )`,
-              }"
-            >
-              <div class="donut-hole">
-                <span class="donut-pct">{{ weeklyWinPct }}%</span>
-                <span class="donut-sub">винрейт</span>
-              </div>
-            </div>
-            <div class="donut-legend">
-              <span class="leg win"><i />{{ weeklyWins }} побед</span>
-              <span class="leg loss"><i />{{ weeklyLosses }} пораж.</span>
-              <span class="leg mute">{{ weeklyTotal }} матчей</span>
-            </div>
+      <div class="hero-right">
+        <div class="week-top">
+          <div>
+            <span class="week-kicker">Эта неделя</span>
+            <p class="week-period" v-if="weekly?.period">{{ weekly.period }}</p>
           </div>
-
-          <!-- Цифры + форма -->
-          <div class="weekly-side">
-            <div class="weekly-stats">
-              <div class="wstat">
-                <span class="wstat-val win">{{ weeklyWins }}</span>
-                <span class="wstat-lbl">W</span>
-              </div>
-              <div class="wstat">
-                <span class="wstat-val loss">{{ weeklyLosses }}</span>
-                <span class="wstat-lbl">L</span>
-              </div>
-              <div class="wstat" v-if="weekly.streak_wins > 1">
-                <span class="wstat-val accent">{{ weekly.streak_wins }}</span>
-                <span class="wstat-lbl">серия</span>
-              </div>
-              <div class="wstat" v-if="weekly.best_hero">
-                <span class="wstat-val hero">{{ weekly.best_hero }}</span>
-                <span class="wstat-lbl">топ</span>
-              </div>
-            </div>
-
-            <div class="form-block" v-if="formList.length">
-              <span class="extra-lbl">Последние катки</span>
-              <div class="form-pills">
-                <span
-                  v-for="(f, i) in formList.slice(0, 16)"
-                  :key="i"
-                  class="fp"
-                  :class="f === 'W' ? 'w' : 'l'"
-                >{{ f }}</span>
-              </div>
-            </div>
+          <div class="weekly-tabs" v-if="(weekly?.available_games || []).length">
+            <button
+              type="button"
+              class="wtab"
+              :class="{ active: weeklyGame === 'all' }"
+              @click="setWeeklyGame('all')"
+            >Все</button>
+            <button
+              v-for="g in weekly.available_games"
+              :key="g.value"
+              type="button"
+              class="wtab"
+              :class="{ active: weeklyGame === g.value }"
+              @click="setWeeklyGame(g.value)"
+            >{{ g.label }}</button>
           </div>
         </div>
 
-        <!-- Heatmap как commits -->
-        <div class="heat-block">
-          <div class="heat-head">
-            <span class="extra-lbl">Активность по дням</span>
+        <template v-if="weekly && weeklyTotal > 0">
+          <div class="week-main">
+            <div class="ring-block">
+              <div
+                class="ring"
+                :style="{
+                  background: `conic-gradient(
+                    var(--success) 0 ${donutWin}%,
+                    rgba(230, 57, 70, 0.85) ${donutWin}% 100%
+                  )`,
+                }"
+              >
+                <div class="ring-hole">
+                  <span class="ring-pct">{{ weeklyWinPct }}%</span>
+                </div>
+              </div>
+              <div class="ring-meta">
+                <span><b class="w">{{ weeklyWins }}</b> W</span>
+                <span><b class="l">{{ weeklyLosses }}</b> L</span>
+                <span class="mute">{{ weeklyTotal }} матч.</span>
+              </div>
+            </div>
+
+            <div class="week-panels">
+              <div class="mini-stat">
+                <span class="ms-val win">{{ weeklyWins }}</span>
+                <span class="ms-lbl">побед</span>
+              </div>
+              <div class="mini-stat">
+                <span class="ms-val loss">{{ weeklyLosses }}</span>
+                <span class="ms-lbl">пораж.</span>
+              </div>
+              <div class="mini-stat" v-if="weekly.best_hero">
+                <span class="ms-val hero">{{ weekly.best_hero }}</span>
+                <span class="ms-lbl">топ</span>
+              </div>
+              <div class="mini-stat" v-else-if="weekly.streak_wins > 1">
+                <span class="ms-val accent">{{ weekly.streak_wins }}</span>
+                <span class="ms-lbl">серия</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row" v-if="formList.length">
+            <span
+              v-for="(f, i) in formList.slice(0, 14)"
+              :key="i"
+              class="fp"
+              :class="f === 'W' ? 'w' : 'l'"
+            >{{ f }}</span>
+          </div>
+
+          <div class="heat-block">
+            <div class="heat-row">
+              <div
+                v-for="day in weekDays"
+                :key="day.date"
+                class="heat-day"
+                :title="dayTitle(day)"
+              >
+                <span class="hcell" :class="'l' + day.level" />
+                <span class="heat-label">{{ day.short }}</span>
+              </div>
+            </div>
             <div class="heat-scale">
               <span>меньше</span>
               <i class="hcell l0" /><i class="hcell l1" /><i class="hcell l2" /><i class="hcell l3" /><i class="hcell l4" />
               <span>больше</span>
             </div>
           </div>
-          <div class="heat-row">
-            <button
-              v-for="day in weekDays"
-              :key="day.date"
-              type="button"
-              class="heat-day"
-              :title="dayTitle(day)"
-            >
-              <span
-                class="hcell"
-                :class="'l' + day.level"
-              />
-              <span class="heat-label">{{ day.label }}</span>
-              <span class="heat-count" v-if="day.matches">{{ day.matches }}</span>
-            </button>
-          </div>
-        </div>
-      </template>
+        </template>
 
-      <div v-else class="weekly-empty">
-        <div class="empty-visual" aria-hidden="true">
-          <span class="hcell l0" /><span class="hcell l0" /><span class="hcell l1" /><span class="hcell l0" /><span class="hcell l0" /><span class="hcell l0" /><span class="hcell l0" />
+        <div v-else class="week-empty">
+          Нет матчей за неделю — сыграй или синкни аккаунт.
         </div>
-        <p>Пока нет матчей за эту неделю.</p>
-        <p class="empty-hint-line">Сыграй или нажми ↻ на игровом аккаунте — здесь появится кольцо, форма и календарь каток.</p>
       </div>
-    </section>
+    </div>
 
     <div class="section-header">
       <h2>Подключённые аккаунты</h2>
@@ -667,12 +661,26 @@ onMounted(() => {
   animation: fadeInUp 0.25s var(--ease) both;
 }
 
-.profile-header {
+/* —— Hero: профиль | неделя —— */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.05fr);
+  gap: 20px 28px;
+  padding: 18px 20px !important;
+  align-items: start;
+  scroll-margin-top: 72px;
+}
+@media (max-width: 960px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hero-left {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
-  padding: 18px 20px !important;
-  width: 100%;
+  gap: 14px;
+  min-width: 0;
 }
 .avatar-big {
   width: 72px;
@@ -685,9 +693,9 @@ onMounted(() => {
   flex-shrink: 0;
 }
 .header-main { min-width: 0; flex: 1; }
-.profile-header h1 {
+.hero h1 {
   margin: 0 0 4px;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
 }
 .steam-id {
@@ -720,8 +728,8 @@ onMounted(() => {
 }
 .gh-bar {
   flex: 1;
-  min-width: 100px;
-  max-width: 220px;
+  min-width: 80px;
+  max-width: 180px;
   height: 6px;
   border-radius: 3px;
   background: var(--bg-sunken);
@@ -772,7 +780,7 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .gh-ref-claim input {
-  width: 130px;
+  width: 120px;
   font-size: 12px;
   padding: 6px 10px;
 }
@@ -788,41 +796,47 @@ onMounted(() => {
 }
 .btn-ref:disabled { opacity: 0.5; }
 
-/* —— Weekly showcase —— */
-.weekly-card {
-  padding: 20px 22px !important;
-  scroll-margin-top: 72px;
-  background:
-    radial-gradient(ellipse 80% 60% at 0% 0%, var(--accent-dim), transparent 55%),
-    var(--bg-card);
+/* Правая колонка — неделя */
+.hero-right {
+  min-width: 0;
+  padding-left: 20px;
+  border-left: 1px solid var(--border-color);
 }
-.weekly-head {
+@media (max-width: 960px) {
+  .hero-right {
+    padding-left: 0;
+    border-left: none;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+  }
+}
+
+.week-top {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
-.weekly-title {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
+.week-kicker {
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-}
-.weekly-period {
-  margin: 0;
-  font-size: 12px;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
+}
+.week-period {
+  margin: 4px 0 0;
+  font-size: 12px;
   font-family: var(--font-mono);
+  color: var(--text-secondary);
 }
 .weekly-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .wtab {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: transparent;
@@ -835,144 +849,128 @@ onMounted(() => {
   background: var(--accent-dim);
 }
 
-.weekly-body {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 28px;
+.week-main {
+  display: flex;
   align-items: center;
-}
-@media (max-width: 700px) {
-  .weekly-body { grid-template-columns: 1fr; justify-items: center; }
+  gap: 18px;
+  flex-wrap: wrap;
 }
 
-.donut-wrap {
+/* Тонкое кольцо через mask */
+.ring-block {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  flex-shrink: 0;
 }
-.donut {
-  width: 140px;
-  height: 140px;
+.ring {
+  width: 88px;
+  height: 88px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 1px var(--border-color), 0 8px 32px rgba(0, 0, 0, 0.35);
+  /* толщина «обода» ~9px */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
 }
-.donut-hole {
-  width: 96px;
-  height: 96px;
+.ring-hole {
+  width: 62px;
+  height: 62px;
   border-radius: 50%;
   background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* маска съедает центр — текст поверх через position */
+  position: absolute;
+}
+.ring-block {
+  position: relative;
+}
+.ring-block .ring-hole {
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: transparent;
+}
+.ring-pct {
+  font-size: 18px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+.ring-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+.ring-meta .w { color: var(--success); }
+.ring-meta .l { color: var(--danger); }
+.ring-meta .mute { color: var(--text-muted); }
+
+.week-panels {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 140px;
+}
+.mini-stat {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  border: 1px solid var(--border-color);
-}
-.donut-pct {
-  font-size: 28px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.03em;
-  line-height: 1;
-}
-.donut-sub {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-.donut-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  justify-content: center;
-  font-size: 12px;
-}
-.leg {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-}
-.leg i {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
-}
-.leg.win i { background: var(--success); }
-.leg.loss i { background: var(--danger); }
-.leg.mute { color: var(--text-muted); }
-
-.weekly-side { width: 100%; min-width: 0; }
-.weekly-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.wstat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 8px;
+  padding: 10px 8px;
   background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
+  min-width: 0;
 }
-.wstat-val {
-  font-size: 22px;
+.ms-val {
+  font-size: 20px;
   font-weight: 700;
   font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
-.wstat-val.win { color: var(--success); }
-.wstat-val.loss { color: var(--danger); }
-.wstat-val.accent { color: var(--accent); }
-.wstat-val.hero {
-  font-size: 13px;
-  font-weight: 700;
+.ms-val.win { color: var(--success); }
+.ms-val.loss { color: var(--danger); }
+.ms-val.accent { color: var(--accent); }
+.ms-val.hero {
+  font-size: 12px;
   font-family: var(--font);
+  font-weight: 700;
   text-align: center;
-  line-height: 1.2;
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+  white-space: nowrap;
 }
-.wstat-lbl {
-  font-size: 10px;
+.ms-lbl {
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
 }
 
-.extra-lbl {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-.form-pills {
+.form-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
+  margin-top: 12px;
 }
 .fp {
-  width: 24px;
-  height: 24px;
-  border-radius: 5px;
-  font-size: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  font-size: 9px;
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -981,112 +979,79 @@ onMounted(() => {
 .fp.w {
   background: rgba(74, 222, 128, 0.18);
   color: var(--success);
-  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.25);
 }
 .fp.l {
-  background: rgba(230, 57, 70, 0.15);
+  background: rgba(230, 57, 70, 0.16);
   color: var(--danger);
-  box-shadow: inset 0 0 0 1px rgba(230, 57, 70, 0.25);
 }
 
-/* Heatmap */
-.heat-block {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border-color);
-}
-.heat-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.heat-scale {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--text-muted);
-}
+.heat-block { margin-top: 12px; }
 .heat-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  gap: 6px;
 }
 .heat-day {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: default;
-  color: inherit;
+  gap: 4px;
 }
 .hcell {
   width: 100%;
+  max-width: 36px;
   aspect-ratio: 1;
-  max-width: 44px;
-  border-radius: 6px;
+  border-radius: 5px;
   border: 1px solid var(--border-color);
   display: block;
   margin: 0 auto;
-  transition: transform 0.12s var(--ease);
-}
-.heat-day:hover .hcell {
-  transform: scale(1.06);
+  box-sizing: border-box;
 }
 .hcell.l0 { background: var(--bg-sunken); }
-.hcell.l1 { background: rgba(230, 57, 70, 0.22); border-color: transparent; }
-.hcell.l2 { background: rgba(230, 57, 70, 0.4); border-color: transparent; }
-.hcell.l3 { background: rgba(230, 57, 70, 0.65); border-color: transparent; }
+.hcell.l1 {
+  background: rgba(230, 57, 70, 0.25);
+  border-color: transparent;
+}
+.hcell.l2 {
+  background: rgba(230, 57, 70, 0.45);
+  border-color: transparent;
+}
+.hcell.l3 {
+  background: rgba(230, 57, 70, 0.7);
+  border-color: transparent;
+}
 .hcell.l4 {
   background: var(--accent);
   border-color: transparent;
-  box-shadow: 0 0 12px var(--accent-dim);
+  box-shadow: 0 0 10px var(--accent-dim);
 }
 .heat-label {
   font-size: 10px;
-  color: var(--text-muted);
-  text-align: center;
-  line-height: 1.2;
-}
-.heat-count {
-  font-size: 10px;
-  font-weight: 700;
   font-family: var(--font-mono);
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
-
-.weekly-empty {
-  text-align: center;
-  padding: 28px 12px 12px;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-.empty-visual {
+.heat-scale {
   display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-bottom: 16px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 8px;
+  font-size: 9px;
+  color: var(--text-muted);
 }
-.empty-visual .hcell {
-  width: 28px;
-  height: 28px;
+.heat-scale .hcell {
+  width: 10px;
+  height: 10px;
   max-width: none;
   aspect-ratio: auto;
+  border-radius: 2px;
 }
-.empty-hint-line {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--text-muted);
-  max-width: 360px;
-  margin-left: auto;
-  margin-right: auto;
-  line-height: 1.45;
+
+.week-empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 16px 0;
+  line-height: 1.4;
 }
 
 .section-header {
@@ -1258,13 +1223,10 @@ onMounted(() => {
 .error-state { color: var(--danger); }
 
 @media (max-width: 900px) {
-  .profile-header { flex-direction: column; align-items: stretch; }
   .avatar-big { width: 56px; height: 56px; }
   .section-header { flex-direction: column; align-items: stretch; }
   .games-table-card { overflow-x: auto; }
   .games-table { min-width: 480px; }
   .gh-bar { max-width: none; }
-  .heat-row { gap: 4px; }
-  .heat-label { font-size: 9px; }
 }
 </style>
