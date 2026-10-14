@@ -38,7 +38,24 @@ const metrics = computed(() =>
   )
 )
 
-// иконки (stroke-пути 24x24) подбираются по подписи метрики
+/** Нет истории, списков и «живых» метрик — показываем понятный empty */
+const isEmptyStats = computed(() => {
+  const s = props.stats
+  if (!s) return true
+  if (isFortnite.value) return false
+  if (hasMatchHistory.value) return false
+  if (s.list?.length || s.list_2?.length) return false
+  const ms = metrics.value
+  if (!ms.length) return true
+  const meaningful = ms.some((m) => {
+    const v = m?.value
+    if (v === null || v === undefined || v === '' || v === '—' || v === '-') return false
+    if (v === 0 || v === '0' || v === '0%' || v === '0.0' || v === '0.00') return false
+    return true
+  })
+  return !meaningful
+})
+
 const ICONS = {
   chart: 'M3 17l6-6 4 4 8-8M14 7h7v7',
   trophy: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3',
@@ -72,58 +89,71 @@ function closeMatch() {
 
 <template>
   <div class="universal-stats" v-if="stats">
-    <FortniteStatsPanel v-if="isFortnite" :stats="stats" />
+    <div v-if="isEmptyStats" class="empty-stats">
+      Статистика недоступна: профиль скрыт, нет публичных матчей
+      или аккаунт ещё не синхронизирован. Это не ошибка сайта.
+    </div>
 
     <template v-else>
-      <div class="stats-row" v-if="metrics.length">
-        <div class="stat-box" v-for="m in metrics" :key="m.label">
-          <span class="stat-icon" :class="m.tone">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round">
-              <path :d="iconFor(m.label)" />
-            </svg>
+      <FortniteStatsPanel v-if="isFortnite" :stats="stats" />
+
+      <template v-else>
+        <div class="stats-row" v-if="metrics.length">
+          <div class="stat-box" v-for="m in metrics" :key="m.label">
+            <span class="stat-icon" :class="m.tone">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path :d="iconFor(m.label)" />
+              </svg>
+            </span>
+            <span class="stat-text">
+              <span class="stat-value" :class="m.tone">{{ m.value }}</span>
+              <span class="stat-label">{{ m.label }}</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="badges-row" v-if="stats.badge || stats.tags?.length">
+          <span class="rank-badge" v-if="stats.badge">{{ stats.badge }}</span>
+          <span
+            class="tag-pill"
+            v-for="(t, i) in (stats.tags || []).filter(Boolean)"
+            :key="i"
+          >
+            {{ t.label }}
           </span>
-          <span class="stat-text">
-            <span class="stat-value" :class="m.tone">{{ m.value }}</span>
-            <span class="stat-label">{{ m.label }}</span>
-          </span>
         </div>
-      </div>
 
-      <div class="badges-row" v-if="stats.badge || stats.tags?.length">
-        <span class="rank-badge" v-if="stats.badge">{{ stats.badge }}</span>
-        <span
-          class="tag-pill"
-          v-for="(t, i) in (stats.tags || []).filter(Boolean)"
-          :key="i"
-        >
-          {{ t.label }}
-        </span>
-      </div>
+        <MatchHistoryTable
+          v-if="hasMatchHistory"
+          :matches="stats.match_history"
+          :can-open-participants="!!matchGame"
+          @open-match="handleOpenMatch"
+        />
 
-      <MatchHistoryTable
-        v-if="hasMatchHistory"
-        :matches="stats.match_history"
-        :can-open-participants="!!matchGame"
-        @open-match="handleOpenMatch"
-      />
-
-      <div class="list-section" v-if="stats.list?.length">
-        <h4>{{ stats.list_title }}</h4>
-        <div class="list-row" v-for="item in stats.list" :key="item.name">
-          <span class="item-name">{{ item.name }}</span>
-          <span class="item-sub" v-if="item.sub">{{ item.sub }}</span>
-          <span class="item-value" :class="{ good: item.good }">{{ item.value }}</span>
+        <div class="list-section" v-if="stats.list?.length">
+          <h4>{{ stats.list_title }}</h4>
+          <div class="list-row" v-for="item in stats.list" :key="item.name">
+            <span class="item-name">{{ item.name }}</span>
+            <span class="item-sub" v-if="item.sub">{{ item.sub }}</span>
+            <span class="item-value" :class="{ good: item.good }">{{ item.value }}</span>
+          </div>
         </div>
-      </div>
 
-      <div class="list-section" v-if="stats.list_2?.length">
-        <h4>{{ stats.list_title_2 }}</h4>
-        <div class="list-row" v-for="item in stats.list_2" :key="item.name">
-          <span class="item-name">{{ item.name }}</span>
-          <span class="item-value">{{ item.value }}</span>
+        <div class="list-section" v-if="stats.list_2?.length">
+          <h4>{{ stats.list_title_2 }}</h4>
+          <div class="list-row" v-for="item in stats.list_2" :key="item.name">
+            <span class="item-name">{{ item.name }}</span>
+            <span class="item-value">{{ item.value }}</span>
+          </div>
         </div>
-      </div>
+      </template>
     </template>
 
     <MatchParticipantsModal
@@ -160,6 +190,17 @@ function closeMatch() {
   width: 100%;
 }
 
+.empty-stats {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
 .stats-row {
   display: grid;
   width: 100%;
@@ -173,13 +214,13 @@ function closeMatch() {
   gap: 12px;
   padding: 12px 14px;
   background: var(--bg-sunken);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--panel-border, var(--border-color));
   border-radius: 14px;
   min-width: 0;
 }
 .stat-box:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 14px var(--glow-soft);
+  box-shadow: 0 0 14px var(--glow-soft, transparent);
 }
 
 .stat-icon {
@@ -192,11 +233,22 @@ function closeMatch() {
   justify-content: center;
   color: var(--accent);
   background: var(--accent-dim);
-  box-shadow: 0 0 12px var(--glow-soft);
+  box-shadow: 0 0 12px var(--glow-soft, transparent);
 }
-.stat-icon svg { width: 18px; height: 18px; }
-.stat-icon.win { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); box-shadow: none; }
-.stat-icon.loss { color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, transparent); box-shadow: none; }
+.stat-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.stat-icon.win {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  box-shadow: none;
+}
+.stat-icon.loss {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  box-shadow: none;
+}
 
 .stat-text {
   display: flex;
@@ -239,12 +291,12 @@ function closeMatch() {
   padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid var(--accent);
-  box-shadow: 0 0 12px var(--glow-soft);
+  box-shadow: 0 0 12px var(--glow-soft, transparent);
 }
 
 .tag-pill {
   background: var(--bg-sunken);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--panel-border, var(--border-color));
   color: var(--text-secondary);
   font-weight: 600;
   font-size: 11px;
@@ -269,15 +321,25 @@ function closeMatch() {
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
 }
-.list-row:last-child { border-bottom: none; }
+.list-row:last-child {
+  border-bottom: none;
+}
 
-.item-name { flex: 1; font-weight: 500; }
-.item-sub { font-size: 12px; color: var(--text-secondary); }
+.item-name {
+  flex: 1;
+  font-weight: 500;
+}
+.item-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
 .item-value {
   font-weight: 600;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
 }
-.item-value.good { color: var(--success); }
+.item-value.good {
+  color: var(--success);
+}
 </style>
