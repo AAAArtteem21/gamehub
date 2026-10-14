@@ -9,33 +9,26 @@
   --bg-sunken: #0a0b0d;
   --border-color: #232529;
   --border-hover: #2e3136;
-
   --accent: #e63946;
   --accent-hover: #f04a56;
   --accent-dim: rgba(230, 57, 70, 0.12);
   --accent-2: #ffffff;
   --accent-2-dim: rgba(255, 255, 255, 0.08);
-
   --text-primary: #ececec;
   --text-secondary: #9b9da3;
   --text-muted: #5f6168;
-
   --success: #4ade80;
   --danger: #e63946;
   --warning: #e0a63c;
-
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
-
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-
   --sidebar-w: 240px;
   --topbar-h: 56px;
 }
@@ -47,17 +40,14 @@
   --bg-sunken: #08090c;
   --border-color: #1f242d;
   --border-hover: #2a303a;
-
   --accent: #d97b3f;
   --accent-hover: #e08a52;
   --accent-dim: rgba(217, 123, 63, 0.12);
   --accent-2: #4c8dae;
   --accent-2-dim: rgba(76, 141, 174, 0.12);
-
   --text-primary: #edeff3;
   --text-secondary: #8d93a1;
   --text-muted: #565c68;
-
   --success: #5fbf7a;
   --danger: #e0645c;
   --warning: #d9a441;
@@ -70,17 +60,14 @@
   --bg-sunken: #080808;
   --border-color: #1f1f1f;
   --border-hover: #2b2b2b;
-
   --accent: #ff2d2d;
   --accent-hover: #ff4545;
   --accent-dim: rgba(255, 45, 45, 0.1);
   --accent-2: #e8e8e8;
   --accent-2-dim: rgba(255, 255, 255, 0.06);
-
   --text-primary: #eeeeee;
   --text-secondary: #888888;
   --text-muted: #555555;
-
   --success: #3dd68c;
   --danger: #ff2d2d;
   --warning: #e6b422;
@@ -93,17 +80,14 @@
   --bg-sunken: #090909;
   --border-color: #262626;
   --border-hover: #333333;
-
   --accent: #d8d8d8;
   --accent-hover: #eeeeee;
   --accent-dim: rgba(255, 255, 255, 0.07);
   --accent-2: #a8a8a8;
   --accent-2-dim: rgba(168, 168, 168, 0.12);
-
   --text-primary: #f0f0f0;
   --text-secondary: #9a9a9a;
   --text-muted: #5c5c5c;
-
   --success: #c8c8c8;
   --danger: #e8e8e8;
   --warning: #b0b0b0;
@@ -229,7 +213,7 @@ a:hover {
   padding: 16px 18px;
 }
 
-.card+.card {
+.card + .card {
   border-top: 1px solid var(--border-color);
 }
 
@@ -315,13 +299,12 @@ select:focus {
   border-color: var(--accent);
 }
 
-/* === АНИМАЦИИ (мягкие, без драмы) === */
+/* === АНИМАЦИИ === */
 @keyframes fadeInUp {
   from {
     opacity: 0;
     transform: translateY(3px);
   }
-
   to {
     opacity: 1;
     transform: none;
@@ -336,14 +319,18 @@ select:focus {
   0% {
     background-position: -200% 0;
   }
-
   100% {
     background-position: 200% 0;
   }
 }
 
 .skeleton {
-  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+  background: linear-gradient(
+    90deg,
+    var(--bg-card) 25%,
+    var(--bg-card-hover) 50%,
+    var(--bg-card) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.4s infinite;
   border-radius: var(--radius-sm);
@@ -380,7 +367,6 @@ select:focus {
   :root {
     --sidebar-w: 280px;
   }
-
   h1 {
     font-size: 1.15rem;
   }
@@ -390,7 +376,6 @@ select:focus {
   body {
     font-size: 12.5px;
   }
-
   .btn-primary,
   .btn-secondary,
   .btn-ghost {
