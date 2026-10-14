@@ -164,6 +164,14 @@ function intensity(matches) {
   return 4
 }
 
+/** Цвет дня: win / loss / mix / none */
+function dayState(day) {
+  if (!day.matches) return 'none'
+  if (day.wins > day.losses) return 'win'
+  if (day.losses > day.wins) return 'loss'
+  return 'mix'
+}
+
 function last7Dates() {
   const out = []
   const end = new Date()
@@ -424,10 +432,17 @@ onMounted(() => {
       </div>
 
       <div class="hero-right">
+        <!-- Заголовок + табы игр -->
         <div class="week-top">
-          <div>
-            <span class="week-kicker">Эта неделя</span>
-            <p class="week-period" v-if="weekly?.period">{{ weekly.period }}</p>
+          <div class="week-title">
+            <svg class="week-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <rect width="18" height="18" x="3" y="4" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+            <div>
+              <span class="week-kicker">Статистика за неделю</span>
+              <p class="week-period" v-if="weekly?.period">{{ weekly.period }}</p>
+            </div>
           </div>
           <div class="weekly-tabs" v-if="(weekly?.available_games || []).length">
             <button
@@ -449,10 +464,10 @@ onMounted(() => {
 
         <template v-if="weekly && weeklyTotal > 0">
           <div class="week-main">
+            <!-- Кольцо + форма -->
             <div class="ring-block">
               <div class="ring">
                 <svg viewBox="0 0 100 100" class="ring-svg" aria-hidden="true">
-                  <!-- подложка: красная, если есть поражения -->
                   <circle
                     cx="50"
                     cy="50"
@@ -460,7 +475,6 @@ onMounted(() => {
                     class="ring-track"
                     :class="{ loss: weeklyLosses > 0 }"
                   />
-                  <!-- дуга побед -->
                   <circle
                     v-if="weeklyWins > 0"
                     cx="50"
@@ -480,37 +494,81 @@ onMounted(() => {
                 <span><b class="l">{{ weeklyLosses }}</b> L</span>
                 <span class="mute">{{ weeklyTotal }} матч.</span>
               </div>
+              <div class="form-row" v-if="formList.length">
+                <span
+                  v-for="(f, i) in formList.slice(0, 10)"
+                  :key="i"
+                  class="fp"
+                  :class="f === 'W' ? 'w' : 'l'"
+                >{{ f }}</span>
+              </div>
             </div>
 
+            <!-- Карточки -->
             <div class="week-panels">
-              <div class="mini-stat">
-                <span class="ms-val win">{{ weeklyWins }}</span>
-                <span class="ms-lbl">побед</span>
+              <div class="stat-card win">
+                <span class="sc-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+                    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                    <path d="M4 22h16" />
+                    <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                    <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                    <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                  </svg>
+                </span>
+                <div class="sc-body">
+                  <span class="sc-val">{{ weeklyWins }}</span>
+                  <span class="sc-lbl">Побед</span>
+                </div>
               </div>
-              <div class="mini-stat">
-                <span class="ms-val loss">{{ weeklyLosses }}</span>
-                <span class="ms-lbl">пораж.</span>
+
+              <div class="stat-card loss">
+                <span class="sc-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m12.5 17-.5-1-.5 1h1z" />
+                    <path
+                      d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"
+                    />
+                    <circle cx="15" cy="12" r="1" />
+                    <circle cx="9" cy="12" r="1" />
+                  </svg>
+                </span>
+                <div class="sc-body">
+                  <span class="sc-val">{{ weeklyLosses }}</span>
+                  <span class="sc-lbl">Поражений</span>
+                </div>
               </div>
-              <div class="mini-stat" v-if="weekly.best_hero">
-                <span class="ms-val hero">{{ weekly.best_hero }}</span>
-                <span class="ms-lbl">топ</span>
+
+              <div class="stat-card top" v-if="weekly.best_hero">
+                <span class="sc-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
+                  </svg>
+                </span>
+                <div class="sc-body">
+                  <span class="sc-val sc-text" :title="weekly.best_hero">{{ weekly.best_hero }}</span>
+                  <span class="sc-lbl">Топ</span>
+                </div>
               </div>
-              <div class="mini-stat" v-else-if="weekly.streak_wins > 1">
-                <span class="ms-val accent">{{ weekly.streak_wins }}</span>
-                <span class="ms-lbl">серия</span>
+
+              <div class="stat-card streak" v-if="weekly.streak_wins > 1">
+                <span class="sc-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                    />
+                  </svg>
+                </span>
+                <div class="sc-body">
+                  <span class="sc-val">{{ weekly.streak_wins }}</span>
+                  <span class="sc-lbl">Серия</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="form-row" v-if="formList.length">
-            <span
-              v-for="(f, i) in formList.slice(0, 14)"
-              :key="i"
-              class="fp"
-              :class="f === 'W' ? 'w' : 'l'"
-            >{{ f }}</span>
-          </div>
-
+          <!-- Дни недели -->
           <div class="heat-block">
             <div class="heat-row">
               <div
@@ -519,16 +577,18 @@ onMounted(() => {
                 class="heat-day"
                 :title="dayTitle(day)"
               >
-                <span class="hcell" :class="'l' + day.level" />
+                <span
+                  class="hcell"
+                  :class="dayState(day)"
+                  :style="{ '--k': day.level }"
+                >{{ day.matches || '' }}</span>
                 <span class="heat-label">{{ day.short }}</span>
               </div>
             </div>
             <div class="heat-scale">
-              <span>меньше</span>
-              <span class="scale-cells">
-                <i class="hcell l0" /><i class="hcell l1" /><i class="hcell l2" /><i class="hcell l3" /><i class="hcell l4" />
-              </span>
-              <span>больше</span>
+              <span class="hs-item"><i class="hs-dot win" />больше побед</span>
+              <span class="hs-item"><i class="hs-dot mix" />поровну</span>
+              <span class="hs-item"><i class="hs-dot loss" />больше поражений</span>
             </div>
           </div>
         </template>
@@ -683,7 +743,7 @@ onMounted(() => {
 /* —— Hero: профиль | неделя —— */
 .hero {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.05fr);
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.3fr);
   gap: 20px 28px;
   padding: 18px 20px !important;
   align-items: start;
@@ -818,7 +878,7 @@ onMounted(() => {
 /* Правая колонка — неделя */
 .hero-right {
   min-width: 0;
-  padding-left: 20px;
+  padding-left: 24px;
   border-left: 1px solid var(--border-color);
 }
 @media (max-width: 960px) {
@@ -836,32 +896,49 @@ onMounted(() => {
   align-items: flex-start;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+.week-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.week-ico {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
 }
 .week-kicker {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: var(--text-primary);
 }
 .week-period {
-  margin: 4px 0 0;
-  font-size: 12px;
+  margin: 2px 0 0;
+  font-size: 11px;
   font-family: var(--font-mono);
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 .weekly-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .wtab {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
+.wtab:hover { color: var(--text-primary); }
 .wtab.active {
   border-color: var(--accent);
   color: var(--accent);
@@ -870,7 +947,7 @@ onMounted(() => {
 
 .week-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 20px;
   flex-wrap: wrap;
 }
@@ -885,8 +962,8 @@ onMounted(() => {
 }
 .ring {
   position: relative;
-  width: 112px;
-  height: 112px;
+  width: 118px;
+  height: 118px;
 }
 .ring-svg {
   display: block;
@@ -918,11 +995,11 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   pointer-events: none;
 }
 .ring-pct {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 800;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -953,63 +1030,17 @@ onMounted(() => {
 .ring-meta .l { color: var(--danger); }
 .ring-meta .mute { color: var(--text-muted); }
 
-/* —— Мини-карточки —— */
-.week-panels {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
-  gap: 8px;
-  flex: 1;
-  min-width: 140px;
-  max-width: 420px;
-}
-.mini-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 12px 8px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  min-width: 0;
-}
-.ms-val {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-}
-.ms-val.win { color: var(--success); }
-.ms-val.loss { color: var(--danger); }
-.ms-val.accent { color: var(--accent); }
-.ms-val.hero {
-  font-size: 12px;
-  font-family: var(--font);
-  font-weight: 700;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-  white-space: nowrap;
-}
-.ms-lbl {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-
 .form-row {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 3px;
-  margin-top: 12px;
+  max-width: 130px;
 }
 .fp {
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 9px;
   font-weight: 800;
   display: flex;
@@ -1025,78 +1056,170 @@ onMounted(() => {
   color: var(--danger);
 }
 
-/* —— Heatmap —— */
-.heat-block { margin-top: 14px; }
+/* —— Карточки статистики —— */
+.week-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  flex: 1;
+  min-width: 200px;
+}
+.stat-card {
+  --c: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+}
+/* тонкая цветная линия снизу */
+.stat-card::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--c), transparent);
+  opacity: 0.7;
+}
+.stat-card.win { --c: var(--success); }
+.stat-card.loss { --c: var(--danger); }
+.stat-card.top { --c: var(--accent); }
+.stat-card.streak { --c: var(--accent); }
+
+.sc-icon {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+}
+.sc-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sc-val {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1.1;
+  color: var(--c);
+}
+.sc-val.sc-text {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* —— Дни недели —— */
+.heat-block { margin-top: 18px; }
 .heat-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 8px;
 }
 .heat-day {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .hcell {
+  --k: 0;
+  --c: transparent;
   width: 100%;
-  max-width: 36px;
+  max-width: 44px;
   aspect-ratio: 1;
-  border-radius: 5px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
-  display: block;
-  margin: 0 auto;
+  background: var(--bg-sunken);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
   box-sizing: border-box;
+  margin: 0 auto;
+  transition: transform 0.15s;
 }
-.hcell.l0 { background: var(--bg-sunken); }
-.hcell.l1 {
-  background: rgba(230, 57, 70, 0.25);
-  border-color: transparent;
+.hcell.win,
+.hcell.loss,
+.hcell.mix {
+  background: color-mix(in srgb, var(--c) calc(14% + var(--k) * 9%), transparent);
+  border-color: color-mix(in srgb, var(--c) calc(35% + var(--k) * 10%), transparent);
+  box-shadow: 0 0 calc(var(--k) * 5px) color-mix(in srgb, var(--c) 45%, transparent);
 }
-.hcell.l2 {
-  background: rgba(230, 57, 70, 0.45);
-  border-color: transparent;
-}
-.hcell.l3 {
-  background: rgba(230, 57, 70, 0.7);
-  border-color: transparent;
-}
-.hcell.l4 {
-  background: var(--accent);
-  border-color: transparent;
-  box-shadow: 0 0 10px var(--accent-dim);
-}
+.hcell.win { --c: var(--success); }
+.hcell.loss { --c: var(--danger); }
+.hcell.mix { --c: var(--accent); }
+.heat-day:hover .hcell { transform: translateY(-2px); }
 .heat-label {
   font-size: 10px;
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
 
-/* легенда — плотная группа справа, без растягивания */
+/* легенда */
 .heat-scale {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  margin-top: 10px;
-  font-size: 9px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 12px;
+  font-size: 10px;
   color: var(--text-muted);
 }
-.scale-cells {
+.hs-item {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
 }
-.scale-cells .hcell {
-  width: 10px;
-  height: 10px;
-  max-width: none;
-  aspect-ratio: auto;
-  border-radius: 2px;
-  margin: 0;
+.hs-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   flex: none;
-  box-shadow: none;
 }
+.hs-dot.win { background: var(--success); }
+.hs-dot.loss { background: var(--danger); }
+.hs-dot.mix { background: var(--accent); }
 
 .week-empty {
   font-size: 13px;
@@ -1279,6 +1402,7 @@ onMounted(() => {
   .games-table-card { overflow-x: auto; }
   .games-table { min-width: 480px; }
   .gh-bar { max-width: none; }
-  .week-panels { max-width: none; }
+  .week-main { justify-content: center; }
+  .week-panels { min-width: 100%; }
 }
 </style>
