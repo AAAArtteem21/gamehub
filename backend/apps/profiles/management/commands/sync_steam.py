@@ -2,7 +2,7 @@ from django.core.cache import cache
 from django.core.management.base import BaseCommand
 
 from apps.profiles.models import GameAccount
-from apps.profiles.services import ProfileSyncService
+from apps.profiles.serivces import ProfileSyncService
 
 
 class Command(BaseCommand):
