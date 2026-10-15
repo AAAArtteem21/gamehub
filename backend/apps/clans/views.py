@@ -68,19 +68,25 @@ class ClanViewSet(viewsets.ModelViewSet):
         url = clan_logo_url(clan, request)
         return Response({"logo": url, "logo_url": url})
     
-    @action(detail=False,methods=['post'],permission_classes=[permissions.IsAuthenticated])
-    def join(self,request):
+    @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def join(self, request):
         serializer = JoinClanSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
+        data = serializer.validated_data
         try:
-            membership = join_clan_by_invite_code(
-                request.user,serializer.validated_data['invite_code']
-            )
+            if data.get("clan_id") and not data.get("invite_code"):
+                from .services import join_open_clan
+                membership = join_open_clan(request.user, data["clan_id"])
+            else:
+                membership = join_clan_by_invite_code(
+                    request.user, data.get("invite_code") or ""
+                )
         except ValueError as e:
-            return Response({'detail':str(e)},status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(ClanMembershipSerializer(membership).data,status=status.HTTP_201_CREATED)
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            ClanMembershipSerializer(membership).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def dashboard(self, request, pk=None):
