@@ -44,8 +44,7 @@ class ClanSerializer(serializers.ModelSerializer):
             "game",
             "game_label",
             "max_members",
-            "join_hours_start",
-            "join_hours_end",
+            "min_playtime_hours",
             "join_requirements",
             "invite_code",
             "is_member",
@@ -79,7 +78,6 @@ class ClanSerializer(serializers.ModelSerializer):
         return m.role if m else None
 
     def get_invite_code(self, obj):
-        """Код только лидер и офицер."""
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return None
@@ -91,13 +89,13 @@ class ClanSerializer(serializers.ModelSerializer):
         return obj.invite_code if ok else None
 
     def get_game_label(self, obj):
-        return dict(Clan.GAME_CHOICES).get(obj.game, obj.game)
+        choices = dict(getattr(Clan, "GAME_CHOICES", []) or [])
+        return choices.get(obj.game, obj.game)
 
     def get_can_join_open(self, obj):
-        """Подсказка UI: открытый и ещё не участник."""
-        request = self.context.get("request")
-        if not obj.is_open:
+        if not getattr(obj, "is_open", False):
             return False
+        request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return True
         return not ClanMembership.objects.filter(clan=obj, user=request.user).exists()
@@ -133,14 +131,9 @@ class ClanSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Слишком большой лимит")
         return value
 
-    def validate_join_hours_start(self, value):
-        if value is not None and not (0 <= int(value) <= 23):
-            raise serializers.ValidationError("Час от 0 до 23")
-        return value
-
-    def validate_join_hours_end(self, value):
-        if value is not None and not (0 <= int(value) <= 23):
-            raise serializers.ValidationError("Час от 0 до 23")
+    def validate_min_playtime_hours(self, value):
+        if value is not None and value > 50000:
+            raise serializers.ValidationError("Слишком большой порог часов")
         return value
 
     def validate(self, attrs):
@@ -151,12 +144,6 @@ class ClanSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"detail": f"Нельзя создать больше {MAX_CLANS_OWNED} кланов"}
                 )
-        start = attrs.get("join_hours_start", getattr(self.instance, "join_hours_start", None))
-        end = attrs.get("join_hours_end", getattr(self.instance, "join_hours_end", None))
-        if (start is None) ^ (end is None):
-            raise serializers.ValidationError(
-                {"join_hours_start": "Укажи оба часа окна входа или ни одного"}
-            )
         return attrs
 
     def create(self, validated_data):

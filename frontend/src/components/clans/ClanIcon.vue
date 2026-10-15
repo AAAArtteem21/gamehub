@@ -17,7 +17,7 @@ function initials(name) {
 }
 
 function logoUrl() {
-  const l = props.clan?.logo
+  const l = props.clan?.logo_url || props.clan?.logo
   if (!l) return null
   if (typeof l === "string") return l
   return l.url || null
@@ -33,10 +33,10 @@ function logoUrl() {
       backgroundImage: logoUrl() ? `url(${logoUrl()})` : 'none',
       background: logoUrl()
         ? undefined
-        : `linear-gradient(135deg, ${colorFor(clan.name)}, ${colorFor(clan.name)}99)`,
+        : `linear-gradient(135deg, ${colorFor(clan?.name)}, ${colorFor(clan?.name)}99)`,
     }"
   >
-    <span v-if="!logoSrc" :style="{ fontSize: size * 0.36 + 'px' }">{{ initials(clan?.name) }}</span>
+    <span v-if="!logoUrl()" :style="{ fontSize: size * 0.36 + 'px' }">{{ initials(clan?.name) }}</span>
   </div>
 </template>
 
@@ -51,6 +51,6 @@ function logoUrl() {
   color: white;
   font-weight: 800;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 </style>

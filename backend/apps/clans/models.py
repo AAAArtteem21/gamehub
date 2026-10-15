@@ -46,9 +46,11 @@ class Clan(models.Model):
         blank=True,
         help_text="None = без лимита",
     )
-    # Часы входа 0–23, UTC или локаль сервера; оба None = круглосуточно
-    join_hours_start = models.PositiveSmallIntegerField(null=True, blank=True)
-    join_hours_end = models.PositiveSmallIntegerField(null=True, blank=True)
+    min_playtime_hours = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Мин. часов в выбранной игре для входа. None = без порога",
+    )
     join_requirements = models.TextField(
         blank=True,
         max_length=500,
