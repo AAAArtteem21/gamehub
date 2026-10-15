@@ -5,7 +5,28 @@ import api from '../../api/axios'
 import ClanIcon from './ClanIcon.vue'
 
 const emit = defineEmits(['close', 'created'])
-const form = ref({ name: '', description: '' })
+
+const form = ref({
+  name: '',
+  description: '',
+  is_open: true,
+  game: 'multigaming',
+  max_members: '',
+  join_hours_start: '',
+  join_hours_end: '',
+  join_requirements: '',
+})
+
+const games = [
+  { value: 'dota2', label: 'Dota 2' },
+  { value: 'valorant', label: 'Valorant' },
+  { value: 'cs2', label: 'CS2 / Faceit' },
+  { value: 'lol', label: 'League of Legends' },
+  { value: 'deadlock', label: 'Deadlock' },
+  { value: 'multigaming', label: 'Мультигейминг' },
+  { value: 'other', label: 'Другое' },
+]
+
 const logoFile = ref(null)
 const logoPreview = ref('')
 const errors = ref({})
@@ -23,28 +44,59 @@ function onFileChange(e) {
   }
   logoFile.value = file
   logoPreview.value = URL.createObjectURL(file)
-  errors.value = { ...errors.value, logo: undefined }
+}
+
+function payloadBase() {
+  const p = {
+    name: form.value.name.trim(),
+    description: form.value.description || '',
+    is_open: !!form.value.is_open,
+    game: form.value.game,
+    join_requirements: form.value.join_requirements || '',
+  }
+  if (form.value.max_members !== '' && form.value.max_members != null) {
+    p.max_members = Number(form.value.max_members)
+  } else {
+    p.max_members = null
+  }
+  if (form.value.join_hours_start !== '' && form.value.join_hours_end !== '') {
+    p.join_hours_start = Number(form.value.join_hours_start)
+    p.join_hours_end = Number(form.value.join_hours_end)
+  } else {
+    p.join_hours_start = null
+    p.join_hours_end = null
+  }
+  return p
 }
 
 async function submit() {
   submitting.value = true
   errors.value = {}
   try {
-    // С файлом — multipart; без — обычный JSON
     let res
+    const body = payloadBase()
     if (logoFile.value) {
       const fd = new FormData()
-      fd.append('name', form.value.name.trim())
-      if (form.value.description) fd.append('description', form.value.description)
+      Object.entries(body).forEach(([k, v]) => {
+        if (v === null || v === undefined) fd.append(k, '')
+        else fd.append(k, String(v))
+      })
       fd.append('logo', logoFile.value)
-      res = await api.post('clans/', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // logo через create multipart может не сохраниться — после create upload_logo
+      res = await api.post('clans/', {
+        ...body,
       })
+      try {
+        const fd2 = new FormData()
+        fd2.append('logo', logoFile.value)
+        const up = await api.post(`clans/${res.data.id}/upload_logo/`, fd2, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        res.data.logo = up.data.logo
+        res.data.logo_url = up.data.logo_url
+      } catch { /* */ }
     } else {
-      res = await clansApi.create({
-        name: form.value.name.trim(),
-        description: form.value.description || '',
-      })
+      res = await clansApi.create(body)
     }
     emit('created', res.data)
     emit('close')
@@ -61,44 +113,88 @@ async function submit() {
     <div class="modal card fade-in-up">
       <div class="modal-header">
         <h3>Создать клан</h3>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button type="button" class="close-btn" @click="emit('close')">✕</button>
       </div>
 
-      <form @submit.prevent="submit" class="form">
+      <form class="form" @submit.prevent="submit">
         <div class="preview-row">
           <ClanIcon
             :clan="{ name: form.name || '?', logo: logoPreview, logo_url: logoPreview }"
             :size="56"
           />
-          <span class="preview-hint">Предпросмотр иконки</span>
+          <span class="preview-hint">Предпросмотр</span>
         </div>
 
         <label>
           Название
-          <input v-model="form.name" placeholder="Название клана" required minlength="3" />
-          <span class="error" v-if="errors.name">{{ Array.isArray(errors.name) ? errors.name[0] : errors.name }}</span>
+          <input v-model="form.name" required minlength="3" maxlength="50" placeholder="Название клана" />
+          <span class="error" v-if="errors.name">{{ errors.name[0] || errors.name }}</span>
         </label>
 
         <label>
           Логотип (необязательно)
           <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="onFileChange" />
-          <span class="hint">JPEG, PNG, WebP, GIF · до 2 МБ. Если не указано — цветная иконка по названию</span>
-          <span class="error" v-if="errors.logo">{{ Array.isArray(errors.logo) ? errors.logo[0] : errors.logo }}</span>
         </label>
 
         <label>
           Описание
-          <textarea v-model="form.description" rows="3" placeholder="Кратко о клане"></textarea>
+          <textarea v-model="form.description" rows="2" maxlength="2000" placeholder="О клане" />
+          <span class="error" v-if="errors.description">{{ errors.description[0] }}</span>
         </label>
 
-        <span class="error" v-if="errors.detail">
-          {{ Array.isArray(errors.detail) ? errors.detail[0] : errors.detail }}
-        </span>
-        <span class="error" v-if="errors.non_field_errors">
-          {{ errors.non_field_errors[0] }}
-        </span>
+        <div class="row-2">
+          <label class="check">
+            <input v-model="form.is_open" type="checkbox" />
+            Открытый клан (вход без кода)
+          </label>
+        </div>
+        <p class="hint">
+          Закрытый — только по коду (код видят лидер и офицеры).
+        </p>
 
-        <button type="submit" class="btn-primary" :disabled="submitting || form.name.trim().length < 3">
+        <label>
+          Игра
+          <select v-model="form.game">
+            <option v-for="g in games" :key="g.value" :value="g.value">{{ g.label }}</option>
+          </select>
+        </label>
+
+        <label>
+          Лимит участников (пусто = без лимита)
+          <input v-model="form.max_members" type="number" min="2" max="500" placeholder="Например 20" />
+        </label>
+
+        <div class="row-2">
+          <label>
+            Вход с часа
+            <input v-model="form.join_hours_start" type="number" min="0" max="23" placeholder="—" />
+          </label>
+          <label>
+            до часа
+            <input v-model="form.join_hours_end" type="number" min="0" max="23" placeholder="—" />
+          </label>
+        </div>
+        <p class="hint">Оба пустые = круглосуточно. Время сервера (локальное TZ Django).</p>
+
+        <label>
+          Требования для входа (видят все)
+          <textarea
+            v-model="form.join_requirements"
+            rows="2"
+            maxlength="500"
+            placeholder="Например: MMR 4k+, микрофон, 18+"
+          />
+          <span class="error" v-if="errors.join_requirements">{{ errors.join_requirements[0] }}</span>
+        </label>
+
+        <span class="error" v-if="errors.detail">{{ errors.detail[0] || errors.detail }}</span>
+        <span class="error" v-if="errors.non_field_errors">{{ errors.non_field_errors[0] }}</span>
+
+        <button
+          type="submit"
+          class="btn-primary"
+          :disabled="submitting || form.name.trim().length < 3"
+        >
           {{ submitting ? 'Создаём...' : 'Создать клан' }}
         </button>
       </form>
@@ -108,31 +204,32 @@ async function submit() {
 
 <style scoped>
 .overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
   display: flex; align-items: center; justify-content: center; z-index: 100;
+  padding: 16px;
 }
-.modal { width: 440px; max-width: 90vw; }
-.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal {
+  width: 460px; max-width: 100%; max-height: 90vh; overflow-y: auto;
+}
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .modal-header h3 { margin: 0; }
-.close-btn { background: none; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; }
-.form { display: flex; flex-direction: column; gap: 14px; }
-
-.preview-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.close-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; }
+.form { display: flex; flex-direction: column; gap: 12px; }
+.preview-row { display: flex; align-items: center; gap: 12px; }
 .preview-hint { font-size: 12px; color: var(--text-secondary); }
-
 label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
-input, textarea {
+label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text-primary); }
+input, textarea, select {
   background: var(--bg-primary); border: 1px solid var(--border-color);
   border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text-primary);
-  font-size: 14px; font-family: inherit; resize: vertical;
+  font-size: 14px; font-family: inherit;
 }
-input[type="file"] { padding: 8px; }
-input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-.hint { font-size: 11px; color: var(--text-muted); }
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hint { margin: 0; font-size: 11px; color: var(--text-muted); }
 .error { color: var(--danger); font-size: 12px; }
 .btn-primary {
-  background: var(--accent); color: white; border: none; padding: 12px;
-  border-radius: var(--radius-sm); font-weight: 600; font-size: 14px; cursor: pointer; margin-top: 6px;
+  background: var(--accent); color: #fff; border: none; padding: 12px;
+  border-radius: var(--radius-sm); font-weight: 600; cursor: pointer;
 }
-.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-primary:disabled { opacity: 0.6; }
 </style>

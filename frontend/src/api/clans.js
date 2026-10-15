@@ -10,8 +10,14 @@ export const clansApi = {
   detail(id) {
     return api.get(`clans/${id}/`)
   },
-  join(inviteCode) {
-    return api.post('clans/join/', { invite_code: inviteCode })
+  join(payload) {
+    if (typeof payload === 'string') {
+      return api.post('clans/join/', { invite_code: payload })
+    }
+    return api.post('clans/join/', payload)
+  },
+  joinOpen(clanId) {
+    return api.post('clans/join/', { clan_id: clanId })
   },
   dashboard(id) {
     return api.get(`clans/${id}/dashboard/`)
@@ -25,8 +31,7 @@ export const clansApi = {
   leave(id) {
     return api.post(`clans/${id}/leave/`)
   },
-  listByUrl(url) {
-    const path = url.replace(/^https?:\/\/[^/]+\/api\//, '')
-    return api.get(path)
+  changeRole(id, userId, role) {
+    return api.post(`clans/${id}/change_role/`, { user_id: userId, role })
   },
 }

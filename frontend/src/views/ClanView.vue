@@ -7,8 +7,10 @@ import JoinClanModal from '../components/clans/JoinClanModal.vue'
 import ClanDashboardTable from '../components/clans/ClanDashboardTable.vue'
 import ClanIcon from '../components/clans/ClanIcon.vue'
 import { useAuthStore } from '../stores/auth'
-const auth = useAuthStore()
+import { useToast } from '../composables/useToast'
 
+const auth = useAuthStore()
+const toast = useToast()
 
 const clans = ref([])
 const loading = ref(true)
@@ -28,18 +30,25 @@ const logoInput = ref(null)
 const roleLabels = { leader: 'Лидер', officer: 'Офицер', member: 'Участник' }
 
 const filteredClans = computed(() =>
-  clans.value.filter((c) => c.name.toLowerCase().includes(searchQuery.value.toLowerCase()))
+  clans.value.filter((c) =>
+    c.name.toLowerCase().includes(searchQuery.value.toLowerCase())
+  )
 )
 
 function isLeader(clan) {
-  return clan?.my_role === 'leader' || (clan?.invite_code != null && clan.invite_code !== '')
+  return clan?.my_role === 'leader'
 }
 
 function openCreate() {
-  if (auth.requireAuth('Войди через Steam, чтобы создать клан.')) showCreateModal.value = true
+  if (auth.requireAuth('Войди через Steam, чтобы создать клан.')) {
+    showCreateModal.value = true
+  }
 }
+
 function openJoin() {
-  if (auth.requireAuth('Войди через Steam, чтобы вступить в клан.')) showJoinModal.value = true
+  if (auth.requireAuth('Войди через Steam, чтобы вступить в клан.')) {
+    showJoinModal.value = true
+  }
 }
 
 async function loadClans() {
@@ -47,8 +56,8 @@ async function loadClans() {
   error.value = null
   try {
     const res = await clansApi.list()
-    clans.value = res.data.results || res.data
-  } catch (e) {
+    clans.value = res.data.results || res.data || []
+  } catch {
     error.value = 'Не удалось загрузить кланы'
   } finally {
     loading.value = false
@@ -65,7 +74,8 @@ async function openClan(clan) {
     const res = await clansApi.dashboard(clan.id)
     dashboard.value = res.data
   } catch (e) {
-    dashboardError.value = e.response?.data?.detail || 'Дашборд доступен только участникам клана'
+    dashboardError.value =
+      e.response?.data?.detail || 'Дашборд доступен только участникам клана'
   } finally {
     dashboardLoading.value = false
   }
@@ -88,7 +98,9 @@ function onDashboardUpdated() {
 }
 
 function copyInviteCode(code) {
+  if (!code) return
   navigator.clipboard.writeText(code)
+  toast.success('Код скопирован')
 }
 
 function activeMembersRatio(clan) {
@@ -104,7 +116,7 @@ async function onLogoSelected(e) {
   if (!file || !selectedClan.value) return
 
   if (file.size > 2 * 1024 * 1024) {
-    alert('Максимум 2 МБ')
+    toast.error('Максимум 2 МБ')
     e.target.value = ''
     return
   }
@@ -116,7 +128,7 @@ async function onLogoSelected(e) {
     const res = await api.post(`clans/${selectedClan.value.id}/upload_logo/`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
-    const url = res.data.logo_url
+    const url = res.data.logo_url || res.data.logo
     selectedClan.value = {
       ...selectedClan.value,
       logo_url: url,
@@ -126,15 +138,40 @@ async function onLogoSelected(e) {
     if (idx !== -1) {
       clans.value[idx] = { ...clans.value[idx], logo_url: url, logo: url }
     }
+    toast.success('Логотип обновлён')
   } catch (err) {
-    const msg =
+    toast.error(
       err.response?.data?.detail ||
-      err.response?.data?.logo?.[0] ||
-      'Не удалось загрузить логотип'
-    alert(msg)
+        err.response?.data?.logo?.[0] ||
+        'Не удалось загрузить логотип'
+    )
   } finally {
     logoUploading.value = false
     e.target.value = ''
+  }
+}
+
+async function joinOpen(clan) {
+  if (!auth.requireAuth('Войди, чтобы вступить')) return
+  try {
+    await clansApi.joinOpen(clan.id)
+    toast.success('Ты в клане')
+    await loadClans()
+  } catch (e) {
+    toast.error(e.response?.data?.detail || 'Не удалось вступить')
+  }
+}
+
+async function leaveClan(clan) {
+  if (!clan) return
+  if (!confirm(`Покинуть «${clan.name}»?`)) return
+  try {
+    await clansApi.leave(clan.id)
+    toast.success('Ты вышел из клана')
+    selectedClan.value = null
+    await loadClans()
+  } catch (e) {
+    toast.error(e.response?.data?.detail || 'Нельзя выйти')
   }
 }
 
@@ -146,13 +183,13 @@ onMounted(loadClans)
     <div class="page-header">
       <div>
         <h1>Кланы</h1>
-        <p class="subtitle">Создавай или вступай — следи за активностью команды</p>
+        <p class="subtitle">Все кланы видны всем — создавай, вступай, следи за активностью</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="btn-secondary" @click="showJoinModal = true">
+        <button type="button" class="btn-secondary" @click="openJoin">
           Вступить по коду
         </button>
-        <button type="button" class="btn-primary" @click="showCreateModal = true">
+        <button type="button" class="btn-primary" @click="openCreate">
           + Создать клан
         </button>
       </div>
@@ -169,12 +206,12 @@ onMounted(loadClans)
     <div v-else-if="error" class="state-message error-state">{{ error }}</div>
 
     <div v-else-if="clans.length === 0" class="state-message empty-state">
-      <p>Ты пока не состоишь ни в одном клане.</p>
+      <p>Пока нет ни одного клана. Создай первый или вступи по коду.</p>
       <div class="header-actions">
-        <button type="button" class="btn-secondary" @click="showJoinModal = true">
+        <button type="button" class="btn-secondary" @click="openJoin">
           Вступить по коду
         </button>
-        <button type="button" class="btn-primary" @click="showCreateModal = true">
+        <button type="button" class="btn-primary" @click="openCreate">
           Создать первый клан
         </button>
       </div>
@@ -182,7 +219,9 @@ onMounted(loadClans)
 
     <div v-else-if="filteredClans.length === 0" class="state-message empty-state">
       <p>Ничего не найдено по запросу «{{ searchQuery }}»</p>
-      <button type="button" class="btn-secondary" @click="searchQuery = ''">Сбросить поиск</button>
+      <button type="button" class="btn-secondary" @click="searchQuery = ''">
+        Сбросить поиск
+      </button>
     </div>
 
     <div v-else class="clans-grid">
@@ -197,16 +236,43 @@ onMounted(loadClans)
           <div class="clan-card-title-block">
             <h3>{{ clan.name }}</h3>
             <span class="my-role-badge" :class="clan.my_role" v-if="clan.my_role">
-              {{ roleLabels[clan.my_role] }}
+              {{ roleLabels[clan.my_role] || clan.my_role }}
             </span>
           </div>
-          <span class="members-badge">{{ clan.members_count }}</span>
+          <span class="members-badge">
+            <template v-if="clan.max_members">
+              {{ clan.members_count }}/{{ clan.max_members }}
+            </template>
+            <template v-else>{{ clan.members_count }}</template>
+          </span>
         </div>
 
         <p class="clan-description">{{ clan.description || 'Без описания' }}</p>
 
+        <div class="clan-meta">
+          <span class="chip" :class="clan.is_open ? 'open' : 'closed'">
+            {{ clan.is_open ? 'Открытый' : 'Закрытый' }}
+          </span>
+          <span class="chip game">{{ clan.game_label || clan.game || '—' }}</span>
+          <span class="chip" v-if="clan.max_members">
+            лимит {{ clan.max_members }}
+          </span>
+          <span
+            class="chip"
+            v-if="clan.join_hours_start != null && clan.join_hours_end != null"
+          >
+            вход {{ String(clan.join_hours_start).padStart(2, '0') }}–{{
+              String(clan.join_hours_end).padStart(2, '0')
+            }}
+          </span>
+        </div>
+
+        <p class="req" v-if="clan.join_requirements">
+          <b>Требования:</b> {{ clan.join_requirements }}
+        </p>
+
         <div class="activity-bar">
-          <div class="activity-fill" :style="{ width: activeMembersRatio(clan) + '%' }"></div>
+          <div class="activity-fill" :style="{ width: activeMembersRatio(clan) + '%' }" />
         </div>
 
         <div
@@ -221,6 +287,25 @@ onMounted(loadClans)
         <div class="member-badge" v-else-if="clan.is_member">
           <span class="member-icon">✓</span>
           <span>Ты в этом клане</span>
+        </div>
+
+        <div class="card-actions" @click.stop>
+          <button
+            v-if="clan.can_join_open && !clan.is_member"
+            type="button"
+            class="btn-primary btn-sm"
+            @click="joinOpen(clan)"
+          >
+            Вступить
+          </button>
+          <button
+            v-if="clan.is_member && clan.my_role !== 'leader'"
+            type="button"
+            class="btn-secondary btn-sm"
+            @click="leaveClan(clan)"
+          >
+            Выйти
+          </button>
         </div>
       </div>
     </div>
@@ -250,18 +335,54 @@ onMounted(loadClans)
                 </button>
               </template>
             </div>
-            <h2>{{ selectedClan.name }} — активность</h2>
+            <div class="modal-title-col">
+              <h2>{{ selectedClan.name }} — активность</h2>
+              <div class="clan-meta modal-meta">
+                <span class="chip" :class="selectedClan.is_open ? 'open' : 'closed'">
+                  {{ selectedClan.is_open ? 'Открытый' : 'Закрытый' }}
+                </span>
+                <span class="chip game">{{
+                  selectedClan.game_label || selectedClan.game
+                }}</span>
+              </div>
+            </div>
           </div>
-          <button type="button" class="close-btn" @click="closeDashboard">✕</button>
+          <div class="modal-header-right">
+            <button
+              v-if="selectedClan.is_member && selectedClan.my_role !== 'leader'"
+              type="button"
+              class="btn-secondary btn-sm"
+              @click="leaveClan(selectedClan)"
+            >
+              Выйти из клана
+            </button>
+            <button type="button" class="close-btn" @click="closeDashboard">✕</button>
+          </div>
+        </div>
+
+        <p class="req modal-req" v-if="selectedClan.join_requirements">
+          <b>Требования:</b> {{ selectedClan.join_requirements }}
+        </p>
+
+        <div
+          class="invite-row modal-invite"
+          v-if="selectedClan.invite_code"
+          @click="copyInviteCode(selectedClan.invite_code)"
+        >
+          <span class="invite-label">Код приглашения:</span>
+          <span class="invite-code">{{ selectedClan.invite_code }}</span>
+          <span class="copy-hint">копировать</span>
         </div>
 
         <div v-if="dashboardLoading" class="state-message">Считаем активность...</div>
-        <div v-else-if="dashboardError" class="state-message error-state">{{ dashboardError }}</div>
+        <div v-else-if="dashboardError" class="state-message error-state">
+          {{ dashboardError }}
+        </div>
         <ClanDashboardTable
           v-else
           :entries="dashboard"
           :clan-id="selectedClan.id"
-          :is-leader="selectedClan.invite_code !== null"
+          :is-leader="isLeader(selectedClan)"
           @updated="onDashboardUpdated"
         />
       </div>
@@ -394,6 +515,53 @@ onMounted(loadClans)
   line-height: 1.4;
 }
 
+.clan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+}
+.chip.open {
+  color: var(--success);
+  background: rgba(74, 222, 128, 0.12);
+}
+.chip.closed {
+  color: var(--warning, #e0a63c);
+  background: rgba(224, 166, 60, 0.12);
+}
+.chip.game {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.req {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.req b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
 .activity-bar {
   height: 3px;
   background: var(--bg-sunken);
@@ -414,8 +582,11 @@ onMounted(loadClans)
   border-radius: var(--radius-sm);
   font-size: 12px;
   border: 1px solid var(--border-color);
+  cursor: pointer;
 }
-.invite-label { color: var(--text-secondary); }
+.invite-label {
+  color: var(--text-secondary);
+}
 .invite-code {
   font-family: var(--font-mono);
   font-weight: 700;
@@ -467,7 +638,9 @@ onMounted(loadClans)
   align-items: center;
   gap: 14px;
 }
-.error-state { color: var(--danger); }
+.error-state {
+  color: var(--danger);
+}
 
 .overlay {
   position: fixed;
@@ -477,6 +650,7 @@ onMounted(loadClans)
   align-items: center;
   justify-content: center;
   z-index: 100;
+  padding: 16px;
 }
 .dashboard-modal {
   width: 820px;
@@ -487,18 +661,32 @@ onMounted(loadClans)
 .modal-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 12px;
   margin-bottom: 16px;
 }
 .modal-header-title {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+.modal-title-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 .modal-header h2 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+}
+.modal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .close-btn {
   background: none;
@@ -507,12 +695,24 @@ onMounted(loadClans)
   font-size: 16px;
   cursor: pointer;
 }
+.modal-meta {
+  margin-top: 0;
+}
+.modal-req {
+  margin-bottom: 12px;
+}
+.modal-invite {
+  margin-bottom: 14px;
+}
 
 .logo-wrap {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
 }
-.logo-file-input { display: none; }
+.logo-file-input {
+  display: none;
+}
 .logo-edit-btn {
   position: absolute;
   right: -6px;
@@ -531,12 +731,29 @@ onMounted(loadClans)
   line-height: 1;
   color: var(--text-secondary);
 }
-.logo-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
-.logo-edit-btn:disabled { opacity: 0.6; cursor: wait; }
+.logo-edit-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.logo-edit-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
 
 @media (max-width: 900px) {
-  .clans-grid { grid-template-columns: 1fr; }
-  .dashboard-modal { width: 100%; max-width: 100vw; max-height: 90vh; border-radius: 0; }
-  .page-header h1 { font-size: 18px; }
+  .clans-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-modal {
+    width: 100%;
+    max-width: 100vw;
+    max-height: 90vh;
+  }
+  .page-header h1 {
+    font-size: 18px;
+  }
+  .modal-header {
+    flex-direction: column;
+  }
 }
 </style>
