@@ -228,10 +228,29 @@ onUnmounted(() => {
     </form>
 
     <div class="top-right">
+      <!-- Смена темы -->
       <div class="theme-wrap" ref="themeRef">
-        <button type="button" class="icon-pill" title="Тема" @click.stop="toggleThemeMenu">◐</button>
+        <button
+          type="button"
+          class="icon-pill"
+          :class="{ active: themeOpen }"
+          title="Тема оформления"
+          aria-label="Тема оформления"
+          @click.stop="toggleThemeMenu"
+        >
+          <svg class="pill-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="13.5" cy="6.5" r="1" />
+            <circle cx="17.5" cy="10.5" r="1" />
+            <circle cx="8.5" cy="7.5" r="1" />
+            <circle cx="6.5" cy="12.5" r="1" />
+            <path
+              d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.75 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-4.96-4.48-9-10-9z"
+            />
+          </svg>
+        </button>
         <transition name="menu-fade">
           <div class="theme-menu" v-if="themeOpen">
+            <div class="menu-title">Тема оформления</div>
             <button
               v-for="t in themes"
               :key="t.id"
@@ -245,23 +264,44 @@ onUnmounted(() => {
                 <b>{{ t.label }}</b>
                 <small>{{ t.hint }}</small>
               </span>
+              <svg v-if="theme === t.id" class="theme-check" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
             </button>
           </div>
         </transition>
       </div>
 
       <template v-if="authStore.isAuthenticated">
+        <!-- Уведомления -->
         <div class="notif-wrap" ref="notifRef">
-          <button type="button" class="icon-pill" title="Уведомления" @click.stop="toggleNotif">
-            <span class="bell-icon">🔔</span>
+          <button
+            type="button"
+            class="icon-pill"
+            :class="{ active: notifOpen, ring: unread > 0 }"
+            title="Уведомления"
+            aria-label="Уведомления"
+            @click.stop="toggleNotif"
+          >
+            <svg class="pill-ico bell" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+              <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+            </svg>
             <span v-if="unread" class="bell-badge">{{ unread > 9 ? '9+' : unread }}</span>
           </button>
 
           <transition name="menu-fade">
             <div class="notif-panel" v-if="notifOpen">
               <div class="notif-head">
-                <span>Уведомления</span>
+                <span class="notif-title">
+                  Уведомления
+                  <em v-if="unread" class="notif-count">{{ unread }}</em>
+                </span>
                 <button v-if="unread" type="button" class="mark-all" @click="markRead()">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18 7 9.5 17 6 13.5" />
+                    <path d="m22 7-8.5 10" />
+                  </svg>
                   Прочитать все
                 </button>
               </div>
@@ -274,20 +314,28 @@ onUnmounted(() => {
                   :class="{ unread: !n.read }"
                   @click="openNotifItem(n)"
                 >
+                  <span class="notif-dot" />
                   <div class="notif-body">
                     <b>{{ n.title }}</b>
                     <span v-if="n.body">{{ n.body }}</span>
                   </div>
                   <span class="notif-time">{{ timeAgo(n.created_at) }}</span>
                 </button>
-                <div v-if="!notifications.length" class="notif-empty">Пока тихо</div>
+                <div v-if="!notifications.length" class="notif-empty">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+                  </svg>
+                  Пока тихо
+                </div>
               </div>
             </div>
           </transition>
         </div>
 
+        <!-- Пользователь -->
         <div class="user-block" ref="menuRef">
-          <button type="button" class="user-trigger" @click.stop="toggleMenu">
+          <button type="button" class="user-trigger" :class="{ active: menuOpen }" @click.stop="toggleMenu">
             <div
               class="avatar"
               :style="
@@ -305,17 +353,28 @@ onUnmounted(() => {
             <span class="username">
               {{ authStore.user?.display_name || authStore.user?.username || '...' }}
             </span>
-            <span class="chevron" :class="{ open: menuOpen }">⌄</span>
+            <svg class="chevron" :class="{ open: menuOpen }" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
           </button>
 
           <transition name="menu-fade">
             <div class="dropdown" v-if="menuOpen">
               <RouterLink to="/profile" class="dropdown-item" @click="menuOpen = false">
-                <span class="dropdown-icon">◈</span> Мой профиль
+                <svg class="dd-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+                </svg>
+                Мой профиль
               </RouterLink>
               <div class="dropdown-divider"></div>
               <button type="button" class="dropdown-item danger" @click="handleLogout">
-                <span class="dropdown-icon">⏻</span> Выйти
+                <svg class="dd-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <path d="m16 17 5-5-5-5" />
+                  <path d="M21 12H9" />
+                </svg>
+                Выйти
               </button>
             </div>
           </transition>
@@ -407,6 +466,7 @@ onUnmounted(() => {
   border-radius: 1px;
 }
 
+/* —— Поиск —— */
 .search {
   position: relative;
   display: flex;
@@ -434,6 +494,12 @@ onUnmounted(() => {
   padding: 10px 16px 10px 40px;
   color: var(--text-primary);
   font-size: 13px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .suggest-box {
@@ -492,6 +558,7 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 
+/* —— Правая часть —— */
 .top-right {
   display: flex;
   align-items: center;
@@ -502,43 +569,73 @@ onUnmounted(() => {
 
 .icon-pill {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
   border: 1px solid var(--panel-border);
   background: var(--bg-card);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: color 0.15s, border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
-.icon-pill:hover {
+.icon-pill:hover,
+.icon-pill.active {
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 14px var(--glow-soft);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  box-shadow: 0 0 16px var(--glow-soft);
 }
-.bell-icon {
-  font-size: 15px;
-  line-height: 1;
+.pill-ico {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
+/* точки палитры — залитые */
+.pill-ico circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* лёгкое покачивание колокольчика при непрочитанных */
+.icon-pill.ring .bell {
+  transform-origin: 50% 3px;
+  animation: bell-ring 4s ease-in-out infinite;
+}
+@keyframes bell-ring {
+  0%, 88%, 100% { transform: rotate(0); }
+  90% { transform: rotate(14deg); }
+  93% { transform: rotate(-12deg); }
+  96% { transform: rotate(8deg); }
+  98% { transform: rotate(-4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-pill.ring .bell { animation: none; }
+}
+
 .bell-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 16px;
-  height: 16px;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
   padding: 0 4px;
   border-radius: 999px;
   background: var(--accent);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 2px var(--bg-primary);
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 10px var(--glow);
 }
 
 .theme-wrap,
@@ -546,11 +643,21 @@ onUnmounted(() => {
 .user-block {
   position: relative;
 }
+
+/* —— Меню темы —— */
+.menu-title {
+  padding: 6px 10px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
 .theme-menu {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  min-width: 210px;
+  min-width: 230px;
   background: var(--bg-card);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
@@ -584,6 +691,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  flex: 1;
+  min-width: 0;
 }
 .theme-meta b {
   font-size: 13px;
@@ -593,9 +702,19 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-muted);
 }
+.theme-check {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
 .theme-dot {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   flex-shrink: 0;
   border: 2px solid var(--border-color);
@@ -605,12 +724,13 @@ onUnmounted(() => {
 .theme-dot[data-t='mono'] { background: #ff2d2d; box-shadow: inset 0 0 0 3px #111; }
 .theme-dot[data-t='ivory'] { background: #f2f2f2; box-shadow: inset 0 0 0 2px #111; }
 
+/* —— Уведомления —— */
 .notif-panel {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: min(340px, 92vw);
-  max-height: 420px;
+  width: min(360px, 92vw);
+  max-height: 440px;
   display: flex;
   flex-direction: column;
   background: var(--bg-card);
@@ -626,10 +746,27 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
+}
+.notif-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+}
+.notif-count {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 2px 7px;
+  border-radius: 999px;
 }
 .mark-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: none;
   background: none;
   color: var(--accent);
@@ -637,12 +774,22 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
 }
+.mark-all svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .notif-list {
   overflow-y: auto;
-  max-height: 360px;
+  max-height: 380px;
 }
 .notif-item {
   display: flex;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
   padding: 12px 14px;
@@ -653,8 +800,21 @@ onUnmounted(() => {
   text-align: left;
   cursor: pointer;
 }
+.notif-item:last-child { border-bottom: none; }
 .notif-item:hover { background: var(--bg-card-hover); }
-.notif-item.unread { background: var(--accent-dim); }
+.notif-item.unread { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.notif-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+  background: transparent;
+}
+.notif-item.unread .notif-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--glow);
+}
 .notif-body {
   flex: 1;
   min-width: 0;
@@ -664,22 +824,46 @@ onUnmounted(() => {
 }
 .notif-body b { font-size: 13px; font-weight: 600; }
 .notif-body span { font-size: 12px; color: var(--text-secondary); line-height: 1.35; }
-.notif-time { font-size: 10px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; }
-.notif-empty { padding: 28px 16px; text-align: center; font-size: 13px; color: var(--text-muted); }
+.notif-time { font-size: 10px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; margin-top: 2px; }
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.notif-empty svg {
+  width: 32px;
+  height: 32px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+}
 
+/* —— Пользователь —— */
 .user-trigger {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 40px;
   background: var(--bg-card);
   border: 1px solid var(--panel-border);
   cursor: pointer;
   padding: 4px 10px 4px 4px;
   border-radius: 12px;
+  color: var(--text-primary);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.user-trigger:hover {
+.user-trigger:hover,
+.user-trigger.active {
   border-color: var(--accent);
-  box-shadow: 0 0 14px var(--glow-soft);
+  box-shadow: 0 0 16px var(--glow-soft);
 }
 .avatar {
   width: 30px;
@@ -703,14 +887,23 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chevron { color: var(--text-secondary); font-size: 12px; transition: transform 0.15s; }
+.chevron {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
 .chevron.open { transform: rotate(180deg); }
 
 .dropdown {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  min-width: 180px;
+  min-width: 190px;
   background: var(--bg-card);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
@@ -725,7 +918,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-radius: 10px;
   color: var(--text-primary);
   text-decoration: none;
@@ -738,19 +931,34 @@ onUnmounted(() => {
   text-align: left;
 }
 .dropdown-item:hover { background: var(--bg-card-hover); }
-.dropdown-item.danger:hover { background: rgba(201, 122, 114, 0.12); color: var(--danger); }
-.dropdown-icon { width: 16px; text-align: center; color: var(--text-secondary); }
+.dropdown-item.danger:hover { background: rgba(230, 57, 70, 0.12); color: var(--danger); }
+.dropdown-item.danger:hover .dd-ico { stroke: var(--danger); }
+.dd-ico {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .dropdown-divider { height: 1px; background: var(--border-color); margin: 4px 2px; }
 
 .login-btn {
   background: #1b2838;
   color: #fff;
   border: 1px solid #2a3f5a;
-  padding: 9px 16px;
+  padding: 10px 16px;
   border-radius: 12px;
   font-weight: 600;
   font-size: 12px;
   cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.login-btn:hover {
+  border-color: #3d5a80;
+  box-shadow: 0 0 14px rgba(61, 90, 128, 0.4);
 }
 
 .menu-fade-enter-active,
@@ -777,5 +985,6 @@ onUnmounted(() => {
 @media (max-width: 480px) {
   .search input { font-size: 12px; padding-left: 36px; }
   .login-btn { padding: 8px 10px; font-size: 11px; }
+  .icon-pill { width: 36px; height: 36px; }
 }
 </style>
