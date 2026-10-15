@@ -1,11 +1,14 @@
-from datetime import datetime
-
-from django.utils import timezone as dj_timezone
-
-from apps.profiles.models import DailySnapshot
 from django.db.models import OuterRef, Subquery
 
+from apps.profiles.models import DailySnapshot
 from .models import Clan, ClanMembership
+
+# Steam appids
+GAME_APPIDS = {
+    "dota2": 570,
+    "cs2": 730,
+    "deadlock": 1422450,
+}
 
 
 def get_users_playtime(user_ids):
@@ -15,17 +18,21 @@ def get_users_playtime(user_ids):
 
     newest_date = (
         DailySnapshot.objects.filter(
-            game_account=OuterRef("game_account"), appid=OuterRef("appid")
+            game_account=OuterRef("game_account"),
+            appid=OuterRef("appid"),
         )
         .order_by("-date")
         .values("date")[:1]
     )
-    rows = (
-        DailySnapshot.objects.filter(
-            game_account__user_id__in=user_ids,
-            game_account__platform="steam",
-            date=Subquery(newest_date),
-        ).values_list("game_account__user_id", "appid", "playtime_forever", "playtime_2weeks")
+    rows = DailySnapshot.objects.filter(
+        game_account__user_id__in=user_ids,
+        game_account__platform="steam",
+        date=Subquery(newest_date),
+    ).values_list(
+        "game_account__user_id",
+        "appid",
+        "playtime_forever",
+        "playtime_2weeks",
     )
 
     best = {}
@@ -48,7 +55,9 @@ def get_users_playtime(user_ids):
 
 
 def get_clan_dashboard(clan: Clan):
-    memberships = list(ClanMembership.objects.filter(clan=clan).select_related("user"))
+    memberships = list(
+        ClanMembership.objects.filter(clan=clan).select_related("user")
+    )
     stats = get_users_playtime([m.user_id for m in memberships])
     result = []
     for m in memberships:
@@ -66,6 +75,57 @@ def get_clan_dashboard(clan: Clan):
     return result
 
 
+def get_user_game_hours(user_id, game: str) -> float:
+    """Часы в игре клана. Для multi/other порог не режем снаружи."""
+    game = (game or "").lower()
+    if game in ("multigaming", "other", ""):
+        return 999999.0
+
+    appid = GAME_APPIDS.get(game)
+    if appid:
+        row = (
+            DailySnapshot.objects.filter(
+                game_account__user_id=user_id,
+                game_account__platform="steam",
+                appid=appid,
+            )
+            .order_by("-date")
+            .values("playtime_forever")
+            .first()
+        )
+        if row and row.get("playtime_forever") is not None:
+            return round((row["playtime_forever"] or 0) / 60.0, 1)
+        return 0.0
+
+    platform_map = {
+        "valorant": "valorant",
+        "lol": "lol",
+        "cs2": "faceit",
+    }
+    plat = platform_map.get(game)
+    if not plat:
+        return 0.0
+
+    from apps.profiles.models import GameAccount
+
+    acc = (
+        GameAccount.objects.filter(user_id=user_id, platform=plat)
+        .order_by("-last_synced_at")
+        .first()
+    )
+    if not acc:
+        return 0.0
+    es = acc.extra_stats or {}
+    if es.get("hours_played") is not None:
+        try:
+            return float(es["hours_played"])
+        except (TypeError, ValueError):
+            pass
+    if getattr(acc, "verified", False) or acc.last_synced_at:
+        return 999999.0
+    return 0.0
+
+
 def _check_join_allowed(clan: Clan, user) -> None:
     if ClanMembership.objects.filter(clan=clan, user=user).exists():
         raise ValueError("Ты уже состоишь в этом клане")
@@ -74,23 +134,22 @@ def _check_join_allowed(clan: Clan, user) -> None:
     if clan.max_members is not None and count >= clan.max_members:
         raise ValueError("Клан заполнен")
 
-    if clan.join_hours_start is not None and clan.join_hours_end is not None:
-        hour = dj_timezone.localtime(dj_timezone.now()).hour
-        start, end = int(clan.join_hours_start), int(clan.join_hours_end)
-        if start <= end:
-            ok = start <= hour < end
-        else:
-            # через полночь, напр. 22–6
-            ok = hour >= start or hour < end
-        if not ok:
+    need = getattr(clan, "min_playtime_hours", None)
+    game = getattr(clan, "game", None) or "multigaming"
+    if need is not None and need > 0 and game not in ("multigaming", "other"):
+        have = get_user_game_hours(user.id, game)
+        if have < need:
+            choices = dict(getattr(Clan, "GAME_CHOICES", []) or [])
+            label = choices.get(game, game)
             raise ValueError(
-                f"Сейчас нельзя вступить (окно входа {start:02d}:00–{end:02d}:00)"
+                f"Нужно минимум {need} ч. в {label} (у тебя ~{have} ч.)"
             )
 
 
 def _after_join(clan, user, membership):
     try:
         from apps.profiles.models import ClanActivity
+
         ClanActivity.objects.create(
             clan=clan,
             user=user,
@@ -102,6 +161,7 @@ def _after_join(clan, user, membership):
     try:
         from apps.users.services import notify
         from apps.users.xp import add_xp, XP_CLAN_JOIN
+
         if clan.owner_id != user.id:
             notify(
                 clan.owner,
@@ -134,7 +194,7 @@ def join_open_clan(user, clan_id: int) -> ClanMembership:
     except Clan.DoesNotExist:
         raise ValueError("Клан не найден")
 
-    if not clan.is_open:
+    if not getattr(clan, "is_open", False):
         raise ValueError("Клан закрытый — нужен код приглашения")
 
     _check_join_allowed(clan, user)

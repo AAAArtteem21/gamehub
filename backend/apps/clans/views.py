@@ -1,34 +1,37 @@
-from django import views
-from django.shortcuts import render
-from rest_framework import viewsets,permissions,status
+from django.db.models import Count
+from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db.models import Count
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Clan,ClanMembership
+
+from .models import Clan, ClanMembership, ClanMessage
 from .serializers import (
-    ClanSerializer,ClanDashboardEntrySerializer,
-    JoinClanSerializer,ClanMembershipSerializer
+    ClanSerializer,
+    ClanDashboardEntrySerializer,
+    JoinClanSerializer,
+    ClanMembershipSerializer,
+    MAX_LOGO_SIZE,
+    ALLOWED_LOGO_TYPES,
 )
 from .utils import clan_logo_url
 from .permissions import IsOwnerOrReadOnly
-from .services import get_clan_dashboard,join_clan_by_invite_code
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import permissions, status
-from .models import Clan, ClanMembership, ClanMessage
+from .services import (
+    get_clan_dashboard,
+    join_clan_by_invite_code,
+    join_open_clan,
+)
+
 
 class ClanViewSet(viewsets.ModelViewSet):
     serializer_class = ClanSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly,IsOwnerOrReadOnly]
-    
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+
     def get_queryset(self):
         return (
-            Clan.objects.
-            select_related('owner')
-            .annotate(members_count_annotated=Count('memberships'))
-            .order_by('-created_at')
+            Clan.objects.select_related("owner")
+            .annotate(members_count_annotated=Count("memberships"))
+            .order_by("-created_at")
         )
 
     @action(
@@ -38,9 +41,6 @@ class ClanViewSet(viewsets.ModelViewSet):
         parser_classes=[MultiPartParser, FormParser],
     )
     def upload_logo(self, request, pk=None):
-        from .utils import clan_logo_url
-        from .serializers import MAX_LOGO_SIZE, ALLOWED_LOGO_TYPES
-
         clan = self.get_object()
         membership = ClanMembership.objects.filter(clan=clan, user=request.user).first()
         if not membership or membership.role != "leader":
@@ -55,7 +55,6 @@ class ClanViewSet(viewsets.ModelViewSet):
         if ct and ct not in ALLOWED_LOGO_TYPES:
             return Response({"detail": "Только JPEG, PNG, WebP, GIF"}, status=400)
 
-        # удалить старый файл при замене (опционально)
         if clan.logo:
             try:
                 clan.logo.delete(save=False)
@@ -64,18 +63,16 @@ class ClanViewSet(viewsets.ModelViewSet):
 
         clan.logo = f
         clan.save(update_fields=["logo"])
-
         url = clan_logo_url(clan, request)
         return Response({"logo": url, "logo_url": url})
-    
+
     @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def join(self, request):
         serializer = JoinClanSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         try:
-            if data.get("clan_id") and not data.get("invite_code"):
-                from .services import join_open_clan
+            if data.get("clan_id") and not (data.get("invite_code") or "").strip():
                 membership = join_open_clan(request.user, data["clan_id"])
             else:
                 membership = join_clan_by_invite_code(
@@ -83,6 +80,7 @@ class ClanViewSet(viewsets.ModelViewSet):
                 )
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response(
             ClanMembershipSerializer(membership).data,
             status=status.HTTP_201_CREATED,
@@ -91,88 +89,94 @@ class ClanViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def dashboard(self, request, pk=None):
         clan = self.get_object()
-
         is_member = ClanMembership.objects.filter(clan=clan, user=request.user).exists()
         if not is_member:
             return Response(
                 {"detail": "Дашборд доступен только участникам клана"},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
-
         data = get_clan_dashboard(clan)
-        serializer = ClanDashboardEntrySerializer(data, many=True)
-        return Response(serializer.data)
+        return Response(ClanDashboardEntrySerializer(data, many=True).data)
 
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def members(self, request, pk=None):
         clan = self.get_object()
         memberships = clan.memberships.select_related("user").order_by("role", "joined_at")
-        serializer = ClanMembershipSerializer(memberships, many=True)
-        return Response(serializer.data)
+        return Response(ClanMembershipSerializer(memberships, many=True).data)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def kick(self, request, pk=None):
         clan = self.get_object()
         target_user_id = request.data.get("user_id")
-
-        requester_membership = ClanMembership.objects.filter(clan=clan, user=request.user).first()
-        if not requester_membership or requester_membership.role not in ("leader", "officer"):
-            return Response({"detail": "Только лидер или офицер могут исключать участников"}, status=status.HTTP_403_FORBIDDEN)
-
-        target_membership = ClanMembership.objects.filter(clan=clan, user_id=target_user_id).first()
-        if not target_membership:
+        requester = ClanMembership.objects.filter(clan=clan, user=request.user).first()
+        if not requester or requester.role not in ("leader", "officer"):
+            return Response(
+                {"detail": "Только лидер или офицер могут исключать участников"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        target = ClanMembership.objects.filter(clan=clan, user_id=target_user_id).first()
+        if not target:
             return Response({"detail": "Участник не найден"}, status=status.HTTP_404_NOT_FOUND)
-
-        if target_membership.role == "leader":
-            return Response({"detail": "Нельзя исключить лидера клана"}, status=status.HTTP_400_BAD_REQUEST)
-
-        target_membership.delete()
+        if target.role == "leader":
+            return Response(
+                {"detail": "Нельзя исключить лидера клана"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if requester.role == "officer" and target.role == "officer":
+            return Response(
+                {"detail": "Офицер не может кикать другого офицера"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        target.delete()
         return Response({"detail": "Участник исключён"})
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def leave(self, request, pk=None):
         clan = self.get_object()
         membership = ClanMembership.objects.filter(clan=clan, user=request.user).first()
-
         if not membership:
-            return Response({"detail": "Ты не состоишь в этом клане"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Ты не состоишь в этом клане"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if membership.role == "leader":
             return Response(
-                {"detail": "Лидер не может покинуть клан — сначала передай лидерство или удали клан"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "detail": "Лидер не может покинуть клан — сначала передай лидерство или удали клан"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-
         membership.delete()
         return Response({"detail": "Ты покинул клан"}, status=status.HTTP_200_OK)
-    
+
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def change_role(self, request, pk=None):
         clan = self.get_object()
         target_user_id = request.data.get("user_id")
         new_role = request.data.get("role")
-
         if new_role not in ("member", "officer", "leader"):
             return Response({"detail": "Недопустимая роль"}, status=status.HTTP_400_BAD_REQUEST)
 
-        requester_membership = ClanMembership.objects.filter(clan=clan, user=request.user).first()
-        if not requester_membership or requester_membership.role != "leader":
-            return Response({"detail": "Только лидер может менять роли"}, status=status.HTTP_403_FORBIDDEN)
-
-        target_membership = ClanMembership.objects.filter(clan=clan, user_id=target_user_id).first()
-        if not target_membership:
+        requester = ClanMembership.objects.filter(clan=clan, user=request.user).first()
+        if not requester or requester.role != "leader":
+            return Response(
+                {"detail": "Только лидер может менять роли"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        target = ClanMembership.objects.filter(clan=clan, user_id=target_user_id).first()
+        if not target:
             return Response({"detail": "Участник не найден"}, status=status.HTTP_404_NOT_FOUND)
 
         if new_role == "leader":
-            requester_membership.role = "officer"
-            requester_membership.save(update_fields=["role"])
+            requester.role = "officer"
+            requester.save(update_fields=["role"])
 
-        target_membership.role = new_role
-        target_membership.save(update_fields=["role"])
+        target.role = new_role
+        target.save(update_fields=["role"])
         return Response({"detail": "Роль обновлена"})
 
 
 class ClanLeaderboardView(APIView):
-    """GET /api/clans/leaderboard/ — топ кланов по часам за 2 недели"""
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -185,54 +189,52 @@ class ClanLeaderboardView(APIView):
             users_by_clan[clan_id].append(user_id)
 
         stats = get_users_playtime({uid for _, uid in pairs})
-
         clans = Clan.objects.filter(id__in=users_by_clan.keys()).annotate(
             members_count_annotated=Count("memberships")
         )
 
         result = []
         for clan in clans:
-            two_weeks = sum(stats.get(u, {}).get("two_weeks", 0) for u in users_by_clan[clan.id])
+            two_weeks = sum(
+                stats.get(u, {}).get("two_weeks", 0) for u in users_by_clan[clan.id]
+            )
             total = sum(stats.get(u, {}).get("total", 0) for u in users_by_clan[clan.id])
             result.append({
                 "id": clan.id,
                 "name": clan.name,
                 "logo": clan_logo_url(clan, request),
                 "members_count": clan.members_count_annotated,
+                "game": getattr(clan, "game", None),
+                "is_open": getattr(clan, "is_open", True),
                 "total_two_weeks_minutes": two_weeks,
                 "total_minutes": total,
             })
 
-        result.sort(key=lambda c: (c["total_two_weeks_minutes"], c["total_minutes"]), reverse=True)
+        result.sort(
+            key=lambda c: (c["total_two_weeks_minutes"], c["total_minutes"]),
+            reverse=True,
+        )
         return Response(result[:15])
 
+
 class MyClansPanelView(APIView):
-    """GET /api/clans/my-panel/ — до 3 кланов: лента + чат"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         memberships = (
-            ClanMembership.objects
-            .filter(user=request.user)
+            ClanMembership.objects.filter(user=request.user)
             .select_related("clan")
             .order_by("-joined_at")[:3]
         )
         result = []
         for m in memberships:
             clan = m.clan
-            logo = None
-            try:
-                if clan.logo:
-                    logo = clan.logo.url
-            except Exception:
-                logo = None
-
             feed = []
             try:
                 from apps.profiles.models import ClanActivity
+
                 acts = (
-                    ClanActivity.objects
-                    .filter(clan=clan)
+                    ClanActivity.objects.filter(clan=clan)
                     .select_related("user")
                     .order_by("-created_at")[:15]
                 )
@@ -248,16 +250,16 @@ class MyClansPanelView(APIView):
                 pass
 
             msgs = (
-                ClanMessage.objects
-                .filter(clan=clan)
+                ClanMessage.objects.filter(clan=clan)
                 .select_related("sender")
                 .order_by("-created_at")[:40]
             )
             msgs = list(reversed(list(msgs)))
             user_ids = [x.sender_id for x in msgs]
             role_map = dict(
-                ClanMembership.objects.filter(clan=clan, user_id__in=user_ids)
-                .values_list("user_id", "role")
+                ClanMembership.objects.filter(clan=clan, user_id__in=user_ids).values_list(
+                    "user_id", "role"
+                )
             )
             messages = [{
                 "id": msg.id,
@@ -280,15 +282,13 @@ class MyClansPanelView(APIView):
 
 
 class ClanMessagesView(APIView):
-    """GET/POST /api/clans/<id>/messages/"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, clan_id):
         if not ClanMembership.objects.filter(clan_id=clan_id, user=request.user).exists():
             return Response({"detail": "Только участники"}, status=status.HTTP_403_FORBIDDEN)
         msgs = (
-            ClanMessage.objects
-            .filter(clan_id=clan_id)
+            ClanMessage.objects.filter(clan_id=clan_id)
             .select_related("sender")
             .order_by("-created_at")[:50]
         )

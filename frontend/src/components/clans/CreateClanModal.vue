@@ -12,8 +12,7 @@ const form = ref({
   is_open: true,
   game: 'multigaming',
   max_members: '',
-  join_hours_start: '',
-  join_hours_end: '',
+  min_playtime_hours: '',
   join_requirements: '',
 })
 
@@ -59,12 +58,11 @@ function payloadBase() {
   } else {
     p.max_members = null
   }
-  if (form.value.join_hours_start !== '' && form.value.join_hours_end !== '') {
-    p.join_hours_start = Number(form.value.join_hours_start)
-    p.join_hours_end = Number(form.value.join_hours_end)
+  if (form.value.min_playtime_hours !== '' && form.value.min_playtime_hours != null) {
+    const n = Number(form.value.min_playtime_hours)
+    p.min_playtime_hours = n > 0 ? n : null
   } else {
-    p.join_hours_start = null
-    p.join_hours_end = null
+    p.min_playtime_hours = null
   }
   return p
 }
@@ -73,30 +71,18 @@ async function submit() {
   submitting.value = true
   errors.value = {}
   try {
-    let res
     const body = payloadBase()
-    if (logoFile.value) {
-      const fd = new FormData()
-      Object.entries(body).forEach(([k, v]) => {
-        if (v === null || v === undefined) fd.append(k, '')
-        else fd.append(k, String(v))
-      })
-      fd.append('logo', logoFile.value)
-      // logo через create multipart может не сохраниться — после create upload_logo
-      res = await api.post('clans/', {
-        ...body,
-      })
+    const res = await clansApi.create(body)
+    if (logoFile.value && res.data?.id) {
       try {
-        const fd2 = new FormData()
-        fd2.append('logo', logoFile.value)
-        const up = await api.post(`clans/${res.data.id}/upload_logo/`, fd2, {
+        const fd = new FormData()
+        fd.append('logo', logoFile.value)
+        const up = await api.post(`clans/${res.data.id}/upload_logo/`, fd, {
           headers: { 'Content-Type': 'multipart/form-data' },
         })
         res.data.logo = up.data.logo
         res.data.logo_url = up.data.logo_url
       } catch { /* */ }
-    } else {
-      res = await clansApi.create(body)
     }
     emit('created', res.data)
     emit('close')
@@ -142,15 +128,11 @@ async function submit() {
           <span class="error" v-if="errors.description">{{ errors.description[0] }}</span>
         </label>
 
-        <div class="row-2">
-          <label class="check">
-            <input v-model="form.is_open" type="checkbox" />
-            Открытый клан (вход без кода)
-          </label>
-        </div>
-        <p class="hint">
-          Закрытый — только по коду (код видят лидер и офицеры).
-        </p>
+        <label class="check">
+          <input v-model="form.is_open" type="checkbox" />
+          Открытый клан (вход без кода)
+        </label>
+        <p class="hint">Закрытый — только по коду. Код видят лидер и офицеры.</p>
 
         <label>
           Игра
@@ -164,17 +146,20 @@ async function submit() {
           <input v-model="form.max_members" type="number" min="2" max="500" placeholder="Например 20" />
         </label>
 
-        <div class="row-2">
-          <label>
-            Вход с часа
-            <input v-model="form.join_hours_start" type="number" min="0" max="23" placeholder="—" />
-          </label>
-          <label>
-            до часа
-            <input v-model="form.join_hours_end" type="number" min="0" max="23" placeholder="—" />
-          </label>
-        </div>
-        <p class="hint">Оба пустые = круглосуточно. Время сервера (локальное TZ Django).</p>
+        <label>
+          Мин. часов в игре для входа
+          <input
+            v-model="form.min_playtime_hours"
+            type="number"
+            min="0"
+            placeholder="Пусто — без требования"
+          />
+          <span class="hint">
+            Например 1000 для Dota. Считаются часы Steam / привязанный аккаунт.
+            Для «Мультигейминг» порог не проверяется.
+          </span>
+          <span class="error" v-if="errors.min_playtime_hours">{{ errors.min_playtime_hours[0] }}</span>
+        </label>
 
         <label>
           Требования для входа (видят все)
@@ -182,7 +167,7 @@ async function submit() {
             v-model="form.join_requirements"
             rows="2"
             maxlength="500"
-            placeholder="Например: MMR 4k+, микрофон, 18+"
+            placeholder="Например: микрофон, 18+, адекват"
           />
           <span class="error" v-if="errors.join_requirements">{{ errors.join_requirements[0] }}</span>
         </label>
@@ -208,9 +193,7 @@ async function submit() {
   display: flex; align-items: center; justify-content: center; z-index: 100;
   padding: 16px;
 }
-.modal {
-  width: 460px; max-width: 100%; max-height: 90vh; overflow-y: auto;
-}
+.modal { width: 460px; max-width: 100%; max-height: 90vh; overflow-y: auto; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .modal-header h3 { margin: 0; }
 .close-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; }
@@ -224,7 +207,6 @@ input, textarea, select {
   border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text-primary);
   font-size: 14px; font-family: inherit;
 }
-.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .hint { margin: 0; font-size: 11px; color: var(--text-muted); }
 .error { color: var(--danger); font-size: 12px; }
 .btn-primary {
