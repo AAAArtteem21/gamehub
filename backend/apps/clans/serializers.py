@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import Clan, ClanMembership
 from .utils import clan_logo_url
 from .profanity import contains_profanity
+from apps.users.display import user_public_name
 
 MAX_LOGO_SIZE = 2 * 1024 * 1024
 ALLOWED_LOGO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -17,8 +18,9 @@ class ClanMembershipSerializer(serializers.ModelSerializer):
         fields = ["id", "clan", "user", "username", "role", "joined_at"]
         read_only_fields = ["user", "joined_at"]
 
+
     def get_username(self, obj):
-        return obj.user.username
+        return user_public_name(obj.user)
 
 
 class ClanSerializer(serializers.ModelSerializer):

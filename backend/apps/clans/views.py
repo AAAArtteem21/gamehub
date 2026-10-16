@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
+from apps.users.display import user_public_name
 
 from .models import Clan, ClanMembership, ClanMessage
 from .serializers import (
@@ -101,7 +102,10 @@ class ClanViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def members(self, request, pk=None):
         clan = self.get_object()
-        memberships = clan.memberships.select_related("user").order_by("role", "joined_at")
+        memberships = (
+            clan.memberships.select_related("user", "user__profile")
+            .order_by("role", "joined_at")
+        )
         return Response(ClanMembershipSerializer(memberships, many=True).data)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
@@ -235,13 +239,13 @@ class MyClansPanelView(APIView):
 
                 acts = (
                     ClanActivity.objects.filter(clan=clan)
-                    .select_related("user")
+                    .select_related("user", "user__profile")
                     .order_by("-created_at")[:15]
                 )
                 for a in acts:
                     feed.append({
                         "id": a.id,
-                        "username": a.user.username if a.user_id else "?",
+                        "username": user_public_name(a.user) if a.user_id else "?",
                         "text": a.text,
                         "kind": a.kind,
                         "created_at": a.created_at,
@@ -251,7 +255,7 @@ class MyClansPanelView(APIView):
 
             msgs = (
                 ClanMessage.objects.filter(clan=clan)
-                .select_related("sender")
+                .select_related("sender", "sender__profile")
                 .order_by("-created_at")[:40]
             )
             msgs = list(reversed(list(msgs)))
@@ -266,7 +270,7 @@ class MyClansPanelView(APIView):
                 "text": msg.text,
                 "created_at": msg.created_at,
                 "sender_id": msg.sender_id,
-                "sender_username": msg.sender.username,
+                "sender_username": user_public_name(msg.sender),
                 "role": role_map.get(msg.sender_id, "member"),
             } for msg in msgs]
 
@@ -289,7 +293,7 @@ class ClanMessagesView(APIView):
             return Response({"detail": "Только участники"}, status=status.HTTP_403_FORBIDDEN)
         msgs = (
             ClanMessage.objects.filter(clan_id=clan_id)
-            .select_related("sender")
+            .select_related("sender", "sender__profile")
             .order_by("-created_at")[:50]
         )
         msgs = list(reversed(list(msgs)))
@@ -301,7 +305,7 @@ class ClanMessagesView(APIView):
             "text": m.text,
             "created_at": m.created_at,
             "sender_id": m.sender_id,
-            "sender_username": m.sender.username,
+            "sender_username": user_public_name(m.sender),
             "role": role_map.get(m.sender_id, "member"),
         } for m in msgs])
 
@@ -320,6 +324,6 @@ class ClanMessagesView(APIView):
             "text": m.text,
             "created_at": m.created_at,
             "sender_id": request.user.id,
-            "sender_username": request.user.username,
+            "sender_username": user_public_name(request.user),
             "role": mem.role,
         }, status=status.HTTP_201_CREATED)

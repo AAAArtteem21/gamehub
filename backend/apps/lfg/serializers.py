@@ -1,10 +1,11 @@
-
 from django.utils import timezone
 from rest_framework import serializers
-from .models import LFGPost, LFGResponse, LFGChatMessage,ContactReveal
-from .validators import validate_no_profanity
 from datetime import timedelta
-from apps.users.models import Notification
+
+from .models import LFGPost, LFGResponse, LFGChatMessage, ContactReveal
+from .validators import validate_no_profanity
+from apps.users.display import user_public_name
+
 
 def user_has_synced_account(user):
     from apps.profiles.models import GameAccount
@@ -12,25 +13,29 @@ def user_has_synced_account(user):
 
 
 class LFGResponseSerializer(serializers.ModelSerializer):
-    user = serializers.StringRelatedField(read_only=True)
+    user = serializers.SerializerMethodField()
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
 
     class Meta:
         model = LFGResponse
-        fields = ['id', 'post', 'user', 'created_at']
-        read_only_fields = ['user', 'created_at']
+        fields = ["id", "post", "user", "user_id", "created_at"]
+        read_only_fields = ["user", "user_id", "created_at"]
+
+    def get_user(self, obj):
+        return user_public_name(obj.user)
 
     def validate_post(self, value):
-        if value.status == 'closed':
+        if value.status == "closed":
             raise serializers.ValidationError("Заявка уже закрыта — набор завершён")
         return value
 
     def validate(self, attrs):
-        request = self.context['request']
+        request = self.context["request"]
         if not user_has_synced_account(request.user):
             raise serializers.ValidationError(
                 "Сначала подключи и синхронизируй игровой аккаунт в профиле"
             )
-        post = attrs['post']
+        post = attrs["post"]
         if LFGResponse.objects.filter(post=post, user=request.user).exists():
             raise serializers.ValidationError("Ты уже откликнулся на эту заявку")
         if post.author_id == request.user.id:
@@ -45,7 +50,10 @@ class LFGResponseSerializer(serializers.ModelSerializer):
         reveal, created = ContactReveal.objects.get_or_create(
             user=response.user,
             post=post,
-            defaults={"contact": post.contact, "expires_at": timezone.now() + timedelta(hours=1)},
+            defaults={
+                "contact": post.contact,
+                "expires_at": timezone.now() + timedelta(hours=1),
+            },
         )
         if not created:
             reveal.contact = post.contact
@@ -56,17 +64,17 @@ class LFGResponseSerializer(serializers.ModelSerializer):
             post.status = "closed"
             post.save(update_fields=["status"])
 
-        # уведомление автору + XP
         try:
             from apps.users.services import notify
             from apps.users.xp import add_xp, XP_LFG_RESPONSE
+
             request_user = self.context["request"].user
             if post.author_id != request_user.id:
                 notify(
                     post.author,
                     kind="lfg_response",
                     title="Новый отклик",
-                    body=f"{request_user.username} откликнулся на «{post.game}»",
+                    body=f"{user_public_name(request_user)} откликнулся на «{post.game}»",
                     link=f"/lfg/{post.id}",
                 )
             add_xp(request_user, XP_LFG_RESPONSE, reason="отклик LFG")
@@ -75,9 +83,10 @@ class LFGResponseSerializer(serializers.ModelSerializer):
 
         return response
 
+
 class LFGPostSerializer(serializers.ModelSerializer):
-    author = serializers.StringRelatedField(read_only=True)
-    author_id = serializers.IntegerField(source='author.id', read_only=True)
+    author = serializers.SerializerMethodField()
+    author_id = serializers.IntegerField(source="author.id", read_only=True)
     author_avatar = serializers.SerializerMethodField()
     responses_count = serializers.SerializerMethodField()
     has_responded = serializers.SerializerMethodField()
@@ -86,27 +95,41 @@ class LFGPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = LFGPost
         fields = [
-            'id', 'author', 'author_id', 'author_avatar', 'game', 'datetime', 'description', 'contact',
-            'slots_needed', 'status', 'created_at', 'responses_count',
-            'has_responded', 'is_author',
+            "id",
+            "author",
+            "author_id",
+            "author_avatar",
+            "game",
+            "datetime",
+            "description",
+            "contact",
+            "slots_needed",
+            "status",
+            "created_at",
+            "responses_count",
+            "has_responded",
+            "is_author",
         ]
-        read_only_fields = ['author', 'status', 'created_at']
+        read_only_fields = ["author", "status", "created_at"]
+
+    def get_author(self, obj):
+        return user_public_name(obj.author)
 
     def get_author_avatar(self, obj):
-        profile = getattr(obj.author, 'profile', None)
+        profile = getattr(obj.author, "profile", None)
         return profile.avatar_url if profile else None
 
     def get_responses_count(self, obj):
-        return getattr(obj, 'responses_count_annotated', None) or obj.responses.count()
+        return getattr(obj, "responses_count_annotated", None) or obj.responses.count()
 
     def get_has_responded(self, obj):
-        request = self.context.get('request')
+        request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
         return obj.responses.filter(user=request.user).exists()
 
     def get_is_author(self, obj):
-        request = self.context.get('request')
+        request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
         return obj.author_id == request.user.id
@@ -143,6 +166,7 @@ class LFGPostSerializer(serializers.ModelSerializer):
         post = super().create(validated_data)
         try:
             from apps.users.xp import add_xp, XP_LFG_POST
+
             add_xp(self.context["request"].user, XP_LFG_POST, reason="заявка LFG")
         except Exception:
             pass
@@ -153,21 +177,33 @@ class LFGPostSerializer(serializers.ModelSerializer):
         is_author = self.get_is_author(instance)
         has_responded = self.get_has_responded(instance)
         if not (is_author or has_responded):
-            data['contact'] = None
+            data["contact"] = None
         return data
 
+
 class LFGChatMessageSerializer(serializers.ModelSerializer):
-    sender_id = serializers.IntegerField(source='sender.id', read_only=True)
-    sender_username = serializers.CharField(source='sender.username', read_only=True)
+    sender_id = serializers.IntegerField(source="sender.id", read_only=True)
+    sender_username = serializers.SerializerMethodField()
     sender_avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = LFGChatMessage
-        fields = ['id', 'post', 'sender_id', 'sender_username', 'sender_avatar', 'text', 'created_at']
-        read_only_fields = ['created_at']
+        fields = [
+            "id",
+            "post",
+            "sender_id",
+            "sender_username",
+            "sender_avatar",
+            "text",
+            "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+    def get_sender_username(self, obj):
+        return user_public_name(obj.sender)
 
     def get_sender_avatar(self, obj):
-        profile = getattr(obj.sender, 'profile', None)
+        profile = getattr(obj.sender, "profile", None)
         return profile.avatar_url if profile else None
 
     def validate_text(self, value):
@@ -179,7 +215,7 @@ class LFGChatMessageSerializer(serializers.ModelSerializer):
         return value
 
     def validate_post(self, value):
-        request = self.context['request']
+        request = self.context["request"]
         is_participant = (
             value.author_id == request.user.id
             or value.responses.filter(user=request.user).exists()
@@ -189,5 +225,5 @@ class LFGChatMessageSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data['sender'] = self.context['request'].user
+        validated_data["sender"] = self.context["request"].user
         return super().create(validated_data)
