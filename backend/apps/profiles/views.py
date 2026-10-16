@@ -805,6 +805,7 @@ class GuestProfileView(APIView):
         }, status=200)
 
     def _faceit_guest(self, external_id):
+        from datetime import datetime
         from .integrations.faceit_client import FaceitClient, FaceitError
         from .serivces import build_display_stats
 
@@ -833,7 +834,6 @@ class GuestProfileView(APIView):
         pid = player.get("player_id")
         nick = player.get("nickname") or raw
         steam32 = None
-        platforms = player.get("platforms") or {}
         games = player.get("games") or {}
         cs = games.get("cs2") or games.get("csgo") or {}
         gp = str(cs.get("game_player_id") or "")
@@ -843,39 +843,128 @@ class GuestProfileView(APIView):
             steam32 = steam64_to_32(raw)
 
         stats = {}
-        history = []
         try:
             stats = client.get_player_stats(pid, "cs2") or {}
         except Exception:
             pass
+
+        # per-match stats (kills/deaths) если API отдаёт
+        per_match = {}
+        try:
+            recent_stats = client.get_recent_match_stats(pid, "cs2", limit=20) or {}
+            items_st = recent_stats.get("items") or []
+            if isinstance(recent_stats, list):
+                items_st = recent_stats
+            for row in items_st:
+                if not isinstance(row, dict):
+                    continue
+                mid = row.get("match_id") or (row.get("stats") or {}).get("match_id")
+                st = row.get("stats") or row
+                if not mid:
+                    continue
+                try:
+                    k = int(float(str(st.get("Kills") or st.get("kills") or 0)))
+                    d = int(float(str(st.get("Deaths") or st.get("deaths") or 0)))
+                    a = int(float(str(st.get("Assists") or st.get("assists") or 0)))
+                except (TypeError, ValueError):
+                    k = d = a = 0
+                per_match[str(mid)] = (k, d, a)
+        except Exception:
+            pass
+
+        history = []
         try:
             hist = client.get_history(pid, game="cs2", limit=20) or {}
-            items = hist.get("items") or hist if isinstance(hist, list) else []
-            if isinstance(hist, dict):
-                items = hist.get("items") or []
+            items = hist.get("items") if isinstance(hist, dict) else hist
+            if not isinstance(items, list):
+                items = []
             for m in items[:20]:
-                res = (m.get("results") or {}).get("score") or {}
+                if not isinstance(m, dict):
+                    continue
+                mid = m.get("match_id")
+                teams = m.get("teams") or {}
+                results = m.get("results") or {}
+                winner = results.get("winner")
+                score = results.get("score") or {}
+
+                # в какой команде был игрок
+                my_faction = None
+                for fk in ("faction1", "faction2"):
+                    roster = (teams.get(fk) or {}).get("players") or (teams.get(fk) or {}).get("roster") or []
+                    for p in roster:
+                        if not isinstance(p, dict):
+                            continue
+                        if p.get("player_id") == pid or (p.get("nickname") or "").lower() == (nick or "").lower():
+                            my_faction = fk
+                            break
+                    if my_faction:
+                        break
+
+                won = None
+                if winner and my_faction:
+                    won = str(winner) == str(my_faction)
+
+                s1 = score.get("faction1")
+                s2 = score.get("faction2")
+                score_str = f"{s1}:{s2}" if s1 is not None and s2 is not None else ""
+
+                kda = per_match.get(str(mid))
+                if kda:
+                    subtitle = f"{kda[0]}/{kda[1]}/{kda[2]}"
+                    if score_str:
+                        subtitle = f"{subtitle} · {score_str}"
+                else:
+                    subtitle = score_str or (m.get("game_mode") or "5v5")
+
+                played_at = None
+                ts = m.get("finished_at") or m.get("started_at")
+                if ts is not None:
+                    try:
+                        ts = int(ts)
+                        if ts > 10_000_000_000:
+                            ts = ts // 1000
+                        played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
+                    except Exception:
+                        played_at = None
+
                 history.append({
-                    "won": None,
+                    "won": won,
                     "title": m.get("competition_name") or "Match",
-                    "subtitle": m.get("game_mode") or "cs2",
-                    "match_id": m.get("match_id"),
-                    "played_at": (m.get("finished_at") and str(m.get("finished_at"))) or None,
+                    "subtitle": subtitle,
+                    "match_id": mid,
+                    "played_at": played_at,
                 })
         except Exception:
             pass
 
         life = (stats.get("lifetime") or {}) if isinstance(stats, dict) else {}
-        wins = int(float(str(life.get("Wins") or life.get("wins") or 0).replace(",", ".") or 0))
-        matches = int(float(str(life.get("Matches") or life.get("matches") or 0).replace(",", ".") or 0))
+
+        def _num(key_list, default=0):
+            for k in key_list:
+                if k in life and life[k] not in (None, ""):
+                    try:
+                        return float(str(life[k]).replace("%", "").replace(",", "."))
+                    except (TypeError, ValueError):
+                        pass
+            return default
+
+        wins = int(_num(["Wins", "wins"], 0))
+        matches = int(_num(["Matches", "matches"], 0))
         losses = max(matches - wins, 0) if matches else 0
+        winrate = round(wins / matches * 100, 1) if matches else 0
+        # иногда Faceit отдаёт Win Rate % напрямую
+        wr_life = _num(["Win Rate %", "Win Rate", "win_rate"], None)
+        if wr_life is not None and matches:
+            winrate = round(wr_life, 1)
+
         elo = (cs.get("faceit_elo") if isinstance(cs, dict) else None) or player.get("faceit_elo")
-        level = (cs.get("skill_level") if isinstance(cs, dict) else None)
+        level = cs.get("skill_level") if isinstance(cs, dict) else None
 
         extra = {
             "wins": wins,
             "losses": losses,
             "matches": matches,
+            "winrate": winrate,
             "faceit_elo": elo,
             "skill_level": level,
             "match_history": history,
@@ -883,11 +972,13 @@ class GuestProfileView(APIView):
             "player_id": pid,
         }
 
-        gh = GameAccount.objects.filter(platform="faceit").filter(
-            models_Q_external(nick, pid)
-        ).select_related("user").first() if False else (
-            GameAccount.objects.filter(platform="faceit", external_id__iexact=nick).select_related("user").first()
-            or GameAccount.objects.filter(platform="faceit", extra_stats__player_id=pid).select_related("user").first()
+        gh = (
+            GameAccount.objects.filter(platform="faceit", external_id__iexact=nick)
+            .select_related("user")
+            .first()
+            or GameAccount.objects.filter(platform="faceit", extra_stats__player_id=pid)
+            .select_related("user")
+            .first()
         )
 
         related = related_games_for_steam32(steam32, current="faceit") if steam32 else []
@@ -900,7 +991,8 @@ class GuestProfileView(APIView):
             "gamehub_user_id": gh.user_id if gh else None,
             "wins": wins,
             "losses": losses,
-            "tier": f"Level {level}" if level is not None else None,
+            "winrate": winrate,
+            "tier": f"Lvl {level} · {elo} ELO" if level is not None else (f"{elo} ELO" if elo else None),
             "skill_rating": elo,
             "match_history": history,
             "related_games": related,

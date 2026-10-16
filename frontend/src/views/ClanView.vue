@@ -679,10 +679,10 @@ onMounted(() => {
         <div v-else-if="dashboardError" class="state-message error-state">{{ dashboardError }}</div>
         <ClanDashboardTable
           v-else
-          :entries="dashboard"
+          :rows="dashboard"
           :clan-id="selectedClan.id"
-          :is-leader="isLeader(selectedClan)"
-          @updated="onDashboardUpdated"
+          :my-role="selectedClan.my_role || 'member'"
+          @reload="onDashboardUpdated"
         />
       </div>
     </div>
