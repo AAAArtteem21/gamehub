@@ -6,7 +6,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import threading
 from django.core.cache import cache
-
+from .related import (
+    related_games_for_steam32,
+    related_games_for_riot,
+    steam64_to_32,
+    steam32_to_64,
+)
+from apps.users.display import user_public_name
 from .models import GameAccount
 from .serializers import GameAccountSerializer
 from .serivces import ProfileSyncService,SyncError,get_account_summary
@@ -21,14 +27,22 @@ def _list_cache_key(user_id):
 
 def _run_sync_in_background(account_id):
     from .models import GameAccount
+    user_id = None
     try:
         account = GameAccount.objects.get(id=account_id)
+        user_id = account.user_id
         ProfileSyncService(account).sync()
         cache.set(f"sync_status:{account_id}", {"status": "done"}, timeout=300)
     except Exception as e:
-        cache.set(f"sync_status:{account_id}", {"status": "error", "detail": str(e)}, timeout=300)
+        cache.set(
+            f"sync_status:{account_id}",
+            {"status": "error", "detail": str(e)},
+            timeout=300,
+        )
     finally:
         cache.delete(f"profile_sync_cooldown:{account_id}")
+        if user_id is not None:
+            cache.delete(_list_cache_key(user_id))
 
 
 class GameAccountViewSet(viewsets.ModelViewSet):
@@ -197,7 +211,7 @@ class LeaderboardView(APIView):
             winrate = stats.get("winrate", 0)
             data.append({
                 "user_id": acc.user.id,
-                "username": acc.user.username,
+                "username": user_public_name(acc.user),
                 "platform": acc.platform,
                 "skill_rating": acc.skill_rating,
                 "matches": matches,
@@ -288,8 +302,8 @@ class PublicProfileView(APIView):
 
         return Response({
             "id": target.id,
-            "username": target.username,
-            "display_name": display_name or target.username,
+            "username": user_public_name(target),
+            "display_name": display_name or user_public_name(target),
             "avatar_url": avatar_url,
             "steam_id": getattr(profile, "steam_id", None) if profile else None,
             "bio": getattr(profile, "bio", "") if profile else "",
@@ -461,12 +475,16 @@ class WorldLeaderboardView(APIView):
                     platform="faceit", external_id=player.get("nickname", "")
                 ).first()
                 data.append({
-                    "external_id": player.get("user_id"),
+                    "external_id": player.get("nickname") or player.get("user_id"),
                     "name": player.get("nickname", "Игрок"),
                     "avatar": player.get("avatar"),
                     "subtitle": player.get("country", "").upper(),
                     "value": f"ELO {entry.get('faceit_elo', '—')}",
-                    "guest_link": None,  # у Faceit нет отдельного гостевого просмотра, только сам GameEyes-профиль, если зарегистрирован
+                    "guest_link": (
+                        f"/players/guest/faceit/{player.get('nickname')}"
+                        if player.get("nickname")
+                        else None
+                    ),
                     "gamehub_user_id": gh_account.user_id if gh_account else None,
                 })
 
@@ -489,13 +507,14 @@ class WorldLeaderboardView(APIView):
             for p in players:
                 riot_id = f"{p.get('gameName')}#{p.get('tagLine')}"
                 gh_account = GameAccount.objects.filter(platform="valorant", external_id__iexact=riot_id).first()
+                from urllib.parse import quote
                 data.append({
                     "external_id": riot_id,
                     "name": p.get("gameName", "Игрок"),
                     "avatar": None,
                     "subtitle": f"#{p.get('leaderboardRank')}",
                     "value": f"{p.get('rankedRating', 0)} RR",
-                    "guest_link": None,
+                    "guest_link": f"/players/guest/valorant/{quote(riot_id, safe='')}",
                     "gamehub_user_id": gh_account.user_id if gh_account else None,
                 })
 
@@ -825,340 +844,213 @@ class GuestProfileView(APIView):
 
     def _faceit_guest(self, external_id):
         from .integrations.faceit_client import FaceitClient, FaceitError
-        from .serivces import build_display_stats  # или .services
+        from .serivces import build_display_stats
 
-        raw = (external_id or "").strip()
+        raw = str(external_id or "").strip()
         if not raw:
-            return Response({"detail": "Укажи ник Facei t"}, status=400)
+            return Response({"detail": "Нет id"}, status=400)
 
         client = FaceitClient()
+        player = None
         try:
-            if len(raw) >= 32 and "-" in raw:
-                player = client.get_player(raw)
+            if raw.startswith("7656119"):
+                player = client.get_player_by_steam_id(raw)
             else:
-                player = client.get_player_by_nickname(raw)
+                try:
+                    player = client.get_player_by_nickname(raw)
+                except FaceitError:
+                    player = client.get_player(raw)
         except FaceitError as e:
             return Response({"detail": str(e)}, status=404)
         except Exception:
-            return Response({"detail": "Игрок не найден"}, status=404)
+            return Response({"detail": "Faceit не найден"}, status=404)
 
-        player_id = player.get("player_id")
-        nickname = player.get("nickname") or raw
+        if not player:
+            return Response({"detail": "Faceit не найден"}, status=404)
+
+        pid = player.get("player_id")
+        nick = player.get("nickname") or raw
+        steam32 = None
+        platforms = player.get("platforms") or {}
         games = player.get("games") or {}
-        game_id = "cs2" if games.get("cs2") else ("csgo" if games.get("csgo") else "cs2")
-        ginfo = games.get(game_id) or {}
+        cs = games.get("cs2") or games.get("csgo") or {}
+        gp = str(cs.get("game_player_id") or "")
+        if gp.startswith("7656119"):
+            steam32 = steam64_to_32(gp)
+        elif raw.startswith("7656119"):
+            steam32 = steam64_to_32(raw)
 
-        def to_int(v, default=0):
-            try:
-                return int(float(str(v).replace(",", ".")))
-            except (TypeError, ValueError):
-                return default
-
-        def to_float(v, default=None):
-            if v is None or v == "":
-                return default
-            try:
-                return float(str(v).replace(",", "."))
-            except (TypeError, ValueError):
-                return default
-
-        skill_level = ginfo.get("skill_level")
-        faceit_elo = ginfo.get("faceit_elo")
+        stats = {}
+        history = []
         try:
-            skill_level = int(skill_level) if skill_level is not None else None
-        except (TypeError, ValueError):
-            skill_level = None
+            stats = client.get_player_stats(pid, "cs2") or {}
+        except Exception:
+            pass
         try:
-            faceit_elo = int(faceit_elo) if faceit_elo is not None else None
-        except (TypeError, ValueError):
-            faceit_elo = None
-
-        lifetime = {}
-        top_maps = []
-        matches_total = wins = 0
-        winrate = kd = hs = adr = entry_rate = kr = None
-
-        try:
-            stats_payload = client.get_player_stats(player_id, game_id)
-            lifetime = stats_payload.get("lifetime") or {}
-
-            def L(*keys, default=None):
-                for k in keys:
-                    if k in lifetime and lifetime[k] not in (None, ""):
-                        return lifetime[k]
-                return default
-
-            matches_total = to_int(L("Matches", "matches", default=0))
-            wins = to_int(L("Wins", "wins", default=0))
-            losses = max(matches_total - wins, 0)
-
-            winrate = to_float(L("Win Rate %", "Winrate %"))
-            if winrate is None and matches_total:
-                winrate = round(wins / matches_total * 100, 1)
-            elif winrate is not None:
-                winrate = round(winrate, 1)
-            else:
-                winrate = 0
-
-            kd = to_float(L("Average K/D Ratio", "K/D Ratio", "K/D"))
-            if kd is not None:
-                kd = round(kd, 2)
-            hs = to_float(L("Average Headshots %", "Headshots %"))
-            if hs is not None:
-                hs = round(hs, 1)
-            adr = to_float(L("ADR", "Average Damage per Round", "Damage/Round"))
-            if adr is not None:
-                adr = round(adr, 1)
-            entry_rate = to_float(L("Entry Success Rate", "Entry Rate %"))
-            if entry_rate is not None:
-                entry_rate = round(entry_rate, 1)
-            kr = to_float(L("K/R Ratio", "Average K/R Ratio", "Kills/Round"))
-            if kr is not None:
-                kr = round(kr, 2)
-
-            for seg in stats_payload.get("segments") or []:
-                label = (seg.get("label") or "").strip()
-                st = seg.get("stats") or {}
-                is_map = (
-                    (seg.get("type") or "").lower() == "map"
-                    or label.lower().startswith("de_")
-                    or label.lower().startswith("cs_")
-                )
-                if not is_map or not label:
-                    continue
-                m_matches = to_int(st.get("Matches") or st.get("matches") or 0)
-                if m_matches <= 0:
-                    continue
-                m_wins = to_int(st.get("Wins") or st.get("wins") or 0)
-                m_wr = to_float(st.get("Win Rate %") or st.get("Winrate %"))
-                if m_wr is None:
-                    m_wr = round(m_wins / m_matches * 100, 1) if m_matches else 0
-                else:
-                    m_wr = round(m_wr, 1)
-                m_kd = to_float(st.get("Average K/D Ratio") or st.get("K/D Ratio"))
-                if m_kd is not None:
-                    m_kd = round(m_kd, 2)
-                top_maps.append({
-                    "name": label,
-                    "matches": m_matches,
-                    "winrate": m_wr,
-                    "kd": m_kd,
+            hist = client.get_history(pid, game="cs2", limit=20) or {}
+            items = hist.get("items") or hist if isinstance(hist, list) else []
+            if isinstance(hist, dict):
+                items = hist.get("items") or []
+            for m in items[:20]:
+                res = (m.get("results") or {}).get("score") or {}
+                history.append({
+                    "won": None,
+                    "title": m.get("competition_name") or "Match",
+                    "subtitle": m.get("game_mode") or "cs2",
+                    "match_id": m.get("match_id"),
+                    "played_at": (m.get("finished_at") and str(m.get("finished_at"))) or None,
                 })
-            top_maps.sort(key=lambda x: x["matches"], reverse=True)
-            top_maps = top_maps[:8]
         except Exception:
-            losses = 0
+            pass
 
-        # история
-        match_history = []
-        form = []
-        try:
-            recent = client.get_recent_match_stats(player_id, game_id, limit=20)
-            items = recent.get("items") or []
-        except Exception:
-            items = []
-
-        def S(stats, *keys, default=None):
-            for k in keys:
-                if k in stats and stats[k] not in (None, ""):
-                    return stats[k]
-            return default
-
-        for item in items[:20]:
-            st = item.get("stats") or {}
-            match_id = item.get("match_id") or item.get("matchId") or S(st, "Match Id")
-            if match_id is not None:
-                match_id = str(match_id)
-
-            result = S(st, "Result", "result")
-            won = True if str(result) in ("1", "Win", "win") else (
-                False if str(result) in ("0", "Loss", "loss") else None
-            )
-            k = S(st, "Kills", "kills") or "0"
-            d = S(st, "Deaths", "deaths") or "0"
-            a = S(st, "Assists", "assists") or "0"
-            kd_m = S(st, "K/D Ratio", "K/D")
-            hs_m = S(st, "Headshots %", "HS %")
-            map_name = S(st, "Map", "map") or "—"
-            score = S(st, "Score", "score")
-
-            try:
-                kd_f = float(str(kd_m).replace(",", "."))
-                if kd_f >= 1.4:
-                    verdict = {"label": "Great", "tone": "great"}
-                elif kd_f >= 1.1:
-                    verdict = {"label": "Good", "tone": "good"}
-                elif kd_f >= 0.85:
-                    verdict = {"label": "OK", "tone": "neutral"}
-                elif kd_f >= 0.6:
-                    verdict = {"label": "Bad", "tone": "bad"}
-                else:
-                    verdict = {"label": "Rough", "tone": "terrible"}
-            except Exception:
-                verdict = None
-
-            if won is True:
-                form.append("W")
-            elif won is False:
-                form.append("L")
-
-            match_history.append({
-                "won": won,
-                "title": map_name,
-                "subtitle": f"{k}/{d}/{a}" + (f" · KD {kd_m}" if kd_m else ""),
-                "match_id": match_id,
-                "verdict": verdict,
-                "details": [
-                    {"label": "Счёт", "value": score or "—"},
-                    {"label": "K/D", "value": kd_m or "—"},
-                    {"label": "HS %", "value": hs_m or "—"},
-                    {"label": "Карта", "value": map_name},
-                ],
-            })
-
-        # avg сами
-        n = sk = sd = sa = 0
-        for m in match_history[:20]:
-            parts = (m.get("subtitle") or "").split("·")[0].strip().split("/")
-            if len(parts) >= 3:
-                sk += to_int(parts[0])
-                sd += to_int(parts[1])
-                sa += to_int(parts[2])
-                n += 1
-        avg_kills = round(sk / n, 1) if n else None
-        avg_deaths = round(sd / n, 1) if n else None
-        avg_assists = round(sa / n, 1) if n else None
-        avg_kd = round((sk + sa) / max(sd, 1), 2) if n else None
+        life = (stats.get("lifetime") or {}) if isinstance(stats, dict) else {}
+        wins = int(float(str(life.get("Wins") or life.get("wins") or 0).replace(",", ".") or 0))
+        matches = int(float(str(life.get("Matches") or life.get("matches") or 0).replace(",", ".") or 0))
+        losses = max(matches - wins, 0) if matches else 0
+        elo = (cs.get("faceit_elo") if isinstance(cs, dict) else None) or player.get("faceit_elo")
+        level = (cs.get("skill_level") if isinstance(cs, dict) else None)
 
         extra = {
-            "player_id": player_id,
-            "game_id": game_id,
-            "skill_level": skill_level,
-            "faceit_elo": faceit_elo,
-            "matches": matches_total,
             "wins": wins,
-            "losses": max(matches_total - wins, 0),
-            "winrate": winrate,
-            "kd": kd,
-            "hs_percent": hs,
-            "avg_kills": avg_kills,
-            "avg_deaths": avg_deaths,
-            "avg_assists": avg_assists,
-            "avg_kd_recent": avg_kd,
-            "adr": adr,
-            "entry_success": entry_rate,
-            "kr": kr,
-            "sample_size": n,
-            "lifetime": lifetime,
-            "top_maps": top_maps,
-            "recent_form": form[:10],
-            "match_history": match_history,
-            "country": player.get("country"),
-            "avatar": player.get("avatar"),
-            "game_label": f"Faceit {game_id.upper()}",
+            "losses": losses,
+            "matches": matches,
+            "faceit_elo": elo,
+            "skill_level": level,
+            "match_history": history,
+            "lifetime": life,
+            "player_id": pid,
         }
 
-        display = build_display_stats("faceit", extra)
+        gh = GameAccount.objects.filter(platform="faceit").filter(
+            models_Q_external(nick, pid)
+        ).select_related("user").first() if False else (
+            GameAccount.objects.filter(platform="faceit", external_id__iexact=nick).select_related("user").first()
+            or GameAccount.objects.filter(platform="faceit", extra_stats__player_id=pid).select_related("user").first()
+        )
+
+        related = related_games_for_steam32(steam32, current="faceit") if steam32 else []
 
         return Response({
-            "platform": "faceit",
-            "game": "faceit",
-            "external_id": nickname,
-            "display_name": nickname,
-            "avatar_url": player.get("avatar"),
-            "is_gamehub": False,
-            "source_label": "Данные Faceit (открытый API)",
-            # плоские поля (на всякий случай)
-            "matches": matches_total,
+            "is_public": True,
+            "display_name": nick,
+            "avatar_url": player.get("avatar") or None,
+            "is_gamehub_user": bool(gh),
+            "gamehub_user_id": gh.user_id if gh else None,
             "wins": wins,
-            "losses": max(matches_total - wins, 0),
-            "winrate": winrate,
-            "kd": kd,
-            "skill_level": skill_level,
-            "faceit_elo": faceit_elo,
-            "match_history": match_history,
-            # главное для UI как у себя
-            "display_stats": display,
+            "losses": losses,
+            "tier": f"Level {level}" if level is not None else None,
+            "skill_rating": elo,
+            "match_history": history,
+            "related_games": related,
+            "empty_reason": None if matches or history else "Нет статистики CS2 на Faceit",
+            "display_stats": build_display_stats("faceit", extra),
         })
 
     def _dota_guest(self, external_id):
         from .integrations.opendota_client import OpenDotaClient
-        from datetime import datetime
+        from .serivces import build_display_stats
+
+        aid = str(external_id or "").strip()
+        if not aid:
+            return Response({"detail": "Нет id"}, status=400)
 
         client = OpenDotaClient()
         try:
-            player = client.get_player(external_id)
-            wl = client.get_win_loss(external_id)
+            player = client.get_player(aid)
+            wl = client.get_win_loss(aid)
+            heroes_raw = client.get_heroes(aid) or []
+            hero_names = client.get_hero_names() or {}
+            recent = client.get_recent_matches(aid, limit=30) or []
         except Exception:
-            return Response(
-                {"detail": "Игрок не найден или профиль полностью закрыт"},
-                status=404,
-            )
+            return Response({
+                "is_public": True,
+                "display_name": aid,
+                "avatar_url": None,
+                "wins": 0,
+                "losses": 0,
+                "match_history": [],
+                "top_heroes": [],
+                "related_games": related_games_for_steam32(aid, current="dota2"),
+                "empty_reason": "Профиль скрыт, OpenDota не ответил или нет данных",
+                "display_stats": build_display_stats("opendota", {}),
+            })
 
-        profile_data = player.get("profile", {}) or {}
-        is_public = bool(profile_data.get("personaname"))
+        wins = wl.get("win", 0) or 0
+        losses = wl.get("lose", 0) or 0
+        total = wins + losses
+        profile = player.get("profile") or {}
+        mmr = (player.get("mmr_estimate") or {}).get("estimate")
 
-        heroes_data = []
-        hero_names = {}
-        try:
-            heroes_raw = client.get_heroes(external_id)
-            hero_names = client.get_hero_names()
-            top = sorted(heroes_raw, key=lambda h: h.get("games", 0), reverse=True)[:5]
-            heroes_data = [
-                {
-                    "name": hero_names.get(h["hero_id"], "?"),
-                    "games": h.get("games", 0),
-                    "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0,
-                }
-                for h in top
-                if h.get("games", 0) > 0
-            ]
-        except Exception:
-            pass
+        top = sorted(heroes_raw, key=lambda h: h.get("games", 0), reverse=True)[:8]
+        top_heroes = [
+            {
+                "name": hero_names.get(h["hero_id"], f"Hero {h['hero_id']}"),
+                "games": h.get("games", 0),
+                "winrate": round(h["win"] / h["games"] * 100, 1) if h.get("games") else 0,
+            }
+            for h in top
+            if h.get("games")
+        ]
 
         match_history = []
-        try:
-            if not hero_names:
-                hero_names = client.get_hero_names()
-            recent = client.get_recent_matches(external_id, limit=20)
-            for m in recent:
-                is_radiant = m.get("player_slot", 0) < 128
-                won = (is_radiant and m.get("radiant_win")) or (
-                    not is_radiant and not m.get("radiant_win")
-                )
-                played_at = None
-                if m.get("start_time"):
-                    try:
-                        played_at = datetime.fromtimestamp(m["start_time"]).strftime("%d.%m.%Y")
-                    except (OSError, ValueError, OverflowError):
-                        played_at = None
-                match_history.append({
-                    "won": won,
-                    "title": hero_names.get(m.get("hero_id"), "?"),
-                    "subtitle": f"{m.get('kills', 0)}/{m.get('deaths', 0)}/{m.get('assists', 0)}",
-                    "match_id": m.get("match_id"),
-                    "duration": f"{round(m.get('duration', 0) / 60)} мин" if m.get("duration") else None,
-                    "played_at": played_at,
-                })
-        except Exception:
-            pass
+        for m in recent[:30]:
+            is_radiant = (m.get("player_slot") or 0) < 128
+            won = (is_radiant and m.get("radiant_win")) or (
+                not is_radiant and not m.get("radiant_win")
+            )
+            hid = m.get("hero_id")
+            title = hero_names.get(hid, f"Hero {hid}")
+            k, d, a = m.get("kills", 0), m.get("deaths", 0), m.get("assists", 0)
+            played_at = None
+            if m.get("start_time"):
+                try:
+                    from datetime import datetime
+                    played_at = datetime.utcfromtimestamp(m["start_time"]).strftime("%d.%m.%Y")
+                except Exception:
+                    pass
+            match_history.append({
+                "won": bool(won),
+                "title": title,
+                "subtitle": f"{k}/{d}/{a}",
+                "match_id": m.get("match_id"),
+                "played_at": played_at,
+                "duration": None,
+            })
 
-        gh_account = GameAccount.objects.filter(
-            platform="opendota", external_id=str(external_id)
-        ).select_related("user").first()
+        gh = GameAccount.objects.filter(
+            platform="opendota", external_id=str(aid)
+        ).select_related("user", "user__profile").first()
+
+        extra = {
+            "wins": wins,
+            "losses": losses,
+            "matches": total,
+            "winrate": round(wins / total * 100, 1) if total else 0,
+            "match_history": match_history,
+            "top_heroes": top_heroes,
+            "skill_rating": mmr,
+        }
+
+        empty_reason = None
+        if total == 0 and not match_history:
+            empty_reason = "Нет каток или профиль скрыт в Steam/OpenDota"
 
         return Response({
-            "is_public": is_public,
-            "display_name": profile_data.get("personaname") if is_public else None,
-            "avatar_url": profile_data.get("avatarfull") if is_public else None,
-            "is_gamehub_user": bool(gh_account),
-            "gamehub_user_id": gh_account.user_id if gh_account else None,
-            "wins": wl.get("win", 0),
-            "losses": wl.get("lose", 0),
-            "mmr_estimate": (player.get("mmr_estimate") or {}).get("estimate"),
+            "is_public": True,
+            "display_name": profile.get("personaname") or aid,
+            "avatar_url": profile.get("avatarfull"),
+            "is_gamehub_user": bool(gh),
+            "gamehub_user_id": gh.user_id if gh else None,
+            "wins": wins,
+            "losses": losses,
+            "mmr_estimate": mmr,
+            "tier": None,
             "rank_tier": player.get("rank_tier"),
-            "top_heroes": heroes_data,
+            "top_heroes": top_heroes,
             "match_history": match_history,
+            "related_games": related_games_for_steam32(aid, current="dota2"),
+            "empty_reason": empty_reason,
+            "display_stats": build_display_stats("opendota", extra),
         })
 
     def _related_games_for_steam32(self, steam32: str, current: str = "dota2"):

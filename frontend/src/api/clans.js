@@ -1,37 +1,22 @@
 import api from './axios'
 
 export const clansApi = {
-  list() {
-    return api.get('clans/')
-  },
-  create(data) {
-    return api.post('clans/', data)
-  },
-  detail(id) {
-    return api.get(`clans/${id}/`)
-  },
-  join(payload) {
-    if (typeof payload === 'string') {
-      return api.post('clans/join/', { invite_code: payload })
-    }
-    return api.post('clans/join/', payload)
-  },
-  joinOpen(clanId) {
-    return api.post('clans/join/', { clan_id: clanId })
-  },
-  dashboard(id) {
-    return api.get(`clans/${id}/dashboard/`)
-  },
-  members(id) {
-    return api.get(`clans/${id}/members/`)
-  },
-  kick(id, userId) {
-    return api.post(`clans/${id}/kick/`, { user_id: userId })
-  },
-  leave(id) {
-    return api.post(`clans/${id}/leave/`)
-  },
-  changeRole(id, userId, role) {
-    return api.post(`clans/${id}/change_role/`, { user_id: userId, role })
-  },
+  list: (params) => api.get('clans/', { params }),
+  create: (data) => api.post('clans/', data),
+  join: (data) => api.post('clans/join/', data),
+  joinOpen: (clanId) => api.post('clans/join/', { clan_id: clanId }),
+  leave: (id) => api.post(`clans/${id}/leave/`),
+  dashboard: (id) => api.get(`clans/${id}/dashboard/`),
+  members: (id) => api.get(`clans/${id}/members/`),
+  kick: (id, userId, reason = '') =>
+    api.post(`clans/${id}/kick/`, { user_id: userId, reason }),
+  ban: (id, userId, reason = '') =>
+    api.post(`clans/${id}/ban/`, { user_id: userId, reason }),
+  unban: (id, userId) => api.post(`clans/${id}/unban/`, { user_id: userId }),
+  modLog: (id) => api.get(`clans/${id}/mod_log/`),
+  bans: (id) => api.get(`clans/${id}/bans/`),
+  uploadLogo: (id, formData) =>
+    api.post(`clans/${id}/upload_logo/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 }
