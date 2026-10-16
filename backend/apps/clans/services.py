@@ -2,7 +2,7 @@ from django.db.models import OuterRef, Subquery
 
 from apps.profiles.models import DailySnapshot
 from .models import Clan, ClanMembership
-
+from apps.users.display import user_public_name
 # Steam appids
 GAME_APPIDS = {
     "dota2": 570,
@@ -154,7 +154,7 @@ def _after_join(clan, user, membership):
             clan=clan,
             user=user,
             kind="joined",
-            text=f"{user.username} вступил в клан",
+            text=f"{user_public_name(user)} вступил в клан",
         )
     except Exception:
         pass
@@ -167,7 +167,7 @@ def _after_join(clan, user, membership):
                 clan.owner,
                 kind="clan_join",
                 title="Новый участник",
-                body=f"{user.username} вступил в {clan.name}",
+                body=f"{user_public_name(user)} вступил в {clan.name}",
                 link="/clans",
             )
         add_xp(user, XP_CLAN_JOIN, reason="вступление в клан")
