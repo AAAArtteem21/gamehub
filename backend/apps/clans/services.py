@@ -1,10 +1,11 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db.models import Max
 from django.utils import timezone as dj_timezone
 
 from .models import Clan, ClanMembership, ClanBan
-from apps.profiles.models import DailySnapshot
+from apps.profiles.models import DailySnapshot, GameAccount
 from apps.users.display import user_public_name
 
 GAME_APPIDS = {
@@ -20,46 +21,88 @@ def _assert_not_banned(clan, user):
 
 
 def get_users_playtime(user_ids):
+    """
+    Минуты для дашборда клана.
+    total     = sum(playtime_forever) по последнему снапшоту каждой игры
+    two_weeks = sum(playtime_2weeks)  — как Steam / профиль (не дельта дат)
+    Fallback на дельту дат, если playtime_2weeks нигде не заполнен.
+    """
     user_ids = list(user_ids or [])
     result = {uid: {"two_weeks": 0, "total": 0} for uid in user_ids}
     if not user_ids:
         return result
 
-    today = dj_timezone.now().date()
-    two_weeks_ago = today - timedelta(days=14)
+    # Последняя дата по (user, appid)
+    latest = (
+        DailySnapshot.objects.filter(game_account__user_id__in=user_ids)
+        .values("game_account__user_id", "appid")
+        .annotate(max_date=Max("date"))
+    )
+    date_map = {
+        (r["game_account__user_id"], r["appid"]): r["max_date"]
+        for r in latest
+    }
+    if not date_map:
+        return result
+
+    # Тянем только «последние» строки
+    from django.db.models import Q
+    q = Q()
+    for (uid, appid), d in date_map.items():
+        q |= Q(game_account__user_id=uid, appid=appid, date=d)
 
     snaps = (
-        DailySnapshot.objects.filter(game_account__user_id__in=user_ids)
+        DailySnapshot.objects.filter(q)
         .select_related("game_account")
-        .order_by("date")
     )
-    by_key = defaultdict(list)
-    for s in snaps:
-        by_key[(s.game_account.user_id, s.appid)].append((s.date, s.playtime_forever or 0))
 
-    for (uid, _appid), pts in by_key.items():
+    used_2w = False
+    for s in snaps:
+        uid = s.game_account.user_id
         if uid not in result:
             continue
-        latest = pts[-1][1]
-        result[uid]["total"] += max(latest, 0)
-        baseline = None
-        in_period = []
-        for d, val in pts:
-            if d < two_weeks_ago:
-                baseline = val
-            elif d <= today:
-                in_period.append(val)
-        if not in_period:
-            continue
-        base = baseline if baseline is not None else in_period[0]
-        result[uid]["two_weeks"] += max(in_period[-1] - base, 0)
+        forever = int(s.playtime_forever or 0)
+        result[uid]["total"] += max(forever, 0)
+
+        if s.playtime_2weeks is not None:
+            result[uid]["two_weeks"] += max(int(s.playtime_2weeks or 0), 0)
+            used_2w = True
+
+    # Если ни у кого нет playtime_2weeks — старый алгоритм по датам
+    if not used_2w:
+        today = dj_timezone.now().date()
+        two_weeks_ago = today - timedelta(days=14)
+        all_snaps = (
+            DailySnapshot.objects.filter(game_account__user_id__in=user_ids)
+            .select_related("game_account")
+            .order_by("date")
+        )
+        by_key = defaultdict(list)
+        for s in all_snaps:
+            by_key[(s.game_account.user_id, s.appid)].append(
+                (s.date, s.playtime_forever or 0)
+            )
+        for (uid, _appid), pts in by_key.items():
+            if uid not in result:
+                continue
+            baseline = None
+            in_period = []
+            for d, val in pts:
+                if d < two_weeks_ago:
+                    baseline = val
+                elif d <= today:
+                    in_period.append(val)
+            if not in_period:
+                continue
+            base = baseline if baseline is not None else in_period[0]
+            result[uid]["two_weeks"] += max(in_period[-1] - base, 0)
+
     return result
 
 
 def get_user_game_hours(user, game: str) -> float:
     game = (game or "").lower()
     if game in ("multi", "", "valorant", "lol"):
-        # нет точного Steam appid — не блокируем по часам
         return 10**9
 
     appid = GAME_APPIDS.get(game)
@@ -105,8 +148,8 @@ def get_clan_dashboard(clan):
     rows = []
     for m in memberships:
         st = stats.get(m.user_id) or {}
-        two = st.get("two_weeks", 0)
-        total = st.get("total", 0)
+        two = int(st.get("two_weeks") or 0)
+        total = int(st.get("total") or 0)
         rows.append({
             "user_id": m.user_id,
             "username": user_public_name(m.user),
@@ -166,4 +209,5 @@ def join_open_clan(user, clan_id: int) -> ClanMembership:
     if not clan.is_open:
         raise ValueError("Клан закрытый — нужен инвайт-код")
     _check_join_allowed(clan, user)
-    membership = ClanMembership.objects.crea
+    membership = ClanMembership.objects.create(clan=clan, user=user, role="member")
+    return _after_join(clan, user, membership)
