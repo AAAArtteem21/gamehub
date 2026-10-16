@@ -1,26 +1,22 @@
 import uuid
-
 from django.conf import settings
 from django.db import models
 
 
 class Clan(models.Model):
-    GAME_DOTA = "dota2"
-    GAME_VAL = "valorant"
-    GAME_CS = "cs2"
-    GAME_LOL = "lol"
+    GAME_DOTA2 = "dota2"
+    GAME_VALORANT = "valorant"
+    GAME_CS2 = "cs2"
     GAME_DEADLOCK = "deadlock"
-    GAME_MULTI = "multigaming"
-    GAME_OTHER = "other"
-
+    GAME_LOL = "lol"
+    GAME_MULTI = "multi"
     GAME_CHOICES = [
-        (GAME_DOTA, "Dota 2"),
-        (GAME_VAL, "Valorant"),
-        (GAME_CS, "CS2 / Faceit"),
-        (GAME_LOL, "League of Legends"),
+        (GAME_DOTA2, "Dota 2"),
+        (GAME_VALORANT, "Valorant"),
+        (GAME_CS2, "CS2"),
         (GAME_DEADLOCK, "Deadlock"),
+        (GAME_LOL, "League of Legends"),
         (GAME_MULTI, "Мультигейминг"),
-        (GAME_OTHER, "Другое"),
     ]
 
     name = models.CharField(max_length=50, unique=True)
@@ -31,32 +27,11 @@ class Clan(models.Model):
     )
     logo = models.ImageField(upload_to="clan_logos/", blank=True, null=True)
     description = models.TextField(blank=True)
-
-    is_open = models.BooleanField(
-        default=True,
-        help_text="Открытый — вступить можно без кода (если проходят лимит/часы). Закрытый — только по коду.",
-    )
-    game = models.CharField(
-        max_length=32,
-        choices=GAME_CHOICES,
-        default=GAME_MULTI,
-    )
-    max_members = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="None = без лимита",
-    )
-    min_playtime_hours = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Мин. часов в выбранной игре для входа. None = без порога",
-    )
-    join_requirements = models.TextField(
-        blank=True,
-        max_length=500,
-        help_text="Текст требований для входа (видят все)",
-    )
-
+    is_open = models.BooleanField(default=True)
+    game = models.CharField(max_length=32, choices=GAME_CHOICES, default=GAME_MULTI)
+    max_members = models.PositiveIntegerField(null=True, blank=True)
+    min_playtime_hours = models.PositiveIntegerField(null=True, blank=True)
+    join_requirements = models.CharField(max_length=500, blank=True, default="")
     invite_code = models.CharField(max_length=8, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -73,16 +48,11 @@ class Clan(models.Model):
     def __str__(self):
         return self.name
 
-    @property
-    def members_count(self):
-        return self.memberships.count()
-
 
 class ClanMembership(models.Model):
     ROLE_LEADER = "leader"
     ROLE_OFFICER = "officer"
     ROLE_MEMBER = "member"
-
     ROLE_CHOICES = [
         (ROLE_LEADER, "Лидер"),
         (ROLE_OFFICER, "Офицер"),
@@ -99,14 +69,11 @@ class ClanMembership(models.Model):
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Участник клана"
-        verbose_name_plural = "Участники клана"
-        unique_together = ("clan", "user")
-        indexes = [models.Index(fields=["clan", "role"])]
-        ordering = ["joined_at"]
+        unique_together = [("clan", "user")]
+        ordering = ["role", "joined_at"]
 
     def __str__(self):
-        return f"{self.user} - {self.clan} ({self.role})"
+        return f"{self.user_id} @ {self.clan_id} ({self.role})"
 
 
 class ClanMessage(models.Model):
@@ -116,11 +83,63 @@ class ClanMessage(models.Model):
         on_delete=models.CASCADE,
         related_name="clan_messages",
     )
-    text = models.TextField(max_length=1000)
+    text = models.CharField(max_length=1000)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["created_at"]
+        ordering = ["-created_at"]
 
-    def __str__(self):
-        return f"{self.clan_id}:{self.sender_id}:{self.text[:30]}"
+
+class ClanBan(models.Model):
+    clan = models.ForeignKey(Clan, on_delete=models.CASCADE, related_name="bans")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="clan_bans",
+    )
+    banned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clan_bans_made",
+    )
+    reason = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["clan", "user"], name="uniq_clan_ban_user"),
+        ]
+        ordering = ["-created_at"]
+
+
+class ClanModerationLog(models.Model):
+    ACTION_KICK = "kick"
+    ACTION_BAN = "ban"
+    ACTION_UNBAN = "unban"
+    ACTION_CHOICES = [
+        (ACTION_KICK, "Kick"),
+        (ACTION_BAN, "Ban"),
+        (ACTION_UNBAN, "Unban"),
+    ]
+
+    clan = models.ForeignKey(Clan, on_delete=models.CASCADE, related_name="mod_logs")
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="clan_mod_actions",
+    )
+    target = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="clan_mod_targets",
+    )
+    reason = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

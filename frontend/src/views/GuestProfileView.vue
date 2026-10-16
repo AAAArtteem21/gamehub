@@ -382,19 +382,14 @@ function goCompare() {
   })
 }
 
-function openRelated(g) {
-  if (g?.path) {
-    router.push(g.path)
+function openRelated(r) {
+  if (r?.path) {
+    router.push(r.path)
     return
   }
-  if (g?.game === 'gamehub' && g.external_id) {
-    router.push(`/players/${g.external_id}`)
-    return
+  if (r?.game && r?.external_id) {
+    router.push(`/players/guest/${r.game}/${encodeURIComponent(r.external_id)}`)
   }
-  const gameName = g?.game || 'dota2'
-  const id = encodeURIComponent(g?.external_id || '')
-  if (!id) return
-  router.push(`/players/guest/${gameName}/${id}`)
 }
 
 const isProfileEmpty = computed(() => {
@@ -639,17 +634,15 @@ watch(() => [route.params.game, route.params.externalId], () => load())
         </div>
       </div>
 
-      <div class="related-row" v-if="profile.related_games?.length">
-        <span class="related-label">Другие игры</span>
+      <div class="related-row" v-if="profile?.related_games?.length">
+        <span class="related-label">Ещё игры</span>
         <button
-          v-for="(g, i) in profile.related_games"
-          :key="(g.path || g.game || '') + '-' + i"
+          v-for="(r, i) in profile.related_games"
+          :key="i"
           type="button"
-          class="btn-secondary"
-          @click="openRelated(g)"
-        >
-          {{ g.label }}
-        </button>
+          class="btn-secondary btn-sm"
+          @click="openRelated(r)"
+        >{{ r.label }}</button>
       </div>
 
       <div v-if="isProfileEmpty" class="card empty-hint-card">

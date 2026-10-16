@@ -1,5 +1,4 @@
 from rest_framework import serializers
-
 from .models import Clan, ClanMembership
 from .utils import clan_logo_url
 from .profanity import contains_profanity
@@ -18,7 +17,6 @@ class ClanMembershipSerializer(serializers.ModelSerializer):
         fields = ["id", "clan", "user", "username", "role", "joined_at"]
         read_only_fields = ["user", "joined_at"]
 
-
     def get_username(self, obj):
         return user_public_name(obj.user)
 
@@ -36,24 +34,10 @@ class ClanSerializer(serializers.ModelSerializer):
     class Meta:
         model = Clan
         fields = [
-            "id",
-            "name",
-            "owner",
-            "logo",
-            "logo_url",
-            "description",
-            "is_open",
-            "game",
-            "game_label",
-            "max_members",
-            "min_playtime_hours",
-            "join_requirements",
-            "invite_code",
-            "is_member",
-            "my_role",
-            "members_count",
-            "can_join_open",
-            "created_at",
+            "id", "name", "owner", "logo", "logo_url", "description",
+            "is_open", "game", "game_label", "max_members", "min_playtime_hours",
+            "join_requirements", "invite_code", "is_member", "my_role",
+            "members_count", "can_join_open", "created_at",
         ]
         read_only_fields = ["owner", "created_at", "logo", "logo_url"]
 
@@ -84,18 +68,15 @@ class ClanSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
         ok = ClanMembership.objects.filter(
-            clan=obj,
-            user=request.user,
-            role__in=["leader", "officer"],
+            clan=obj, user=request.user, role__in=["leader", "officer"]
         ).exists()
         return obj.invite_code if ok else None
 
     def get_game_label(self, obj):
-        choices = dict(getattr(Clan, "GAME_CHOICES", []) or [])
-        return choices.get(obj.game, obj.game)
+        return dict(Clan.GAME_CHOICES).get(obj.game, obj.game)
 
     def get_can_join_open(self, obj):
-        if not getattr(obj, "is_open", False):
+        if not obj.is_open:
             return False
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
@@ -106,8 +87,6 @@ class ClanSerializer(serializers.ModelSerializer):
         value = (value or "").strip()
         if len(value) < 3:
             raise serializers.ValidationError("Название не короче 3 символов")
-        if len(value) > 50:
-            raise serializers.ValidationError("Название слишком длинное")
         if contains_profanity(value):
             raise serializers.ValidationError("В названии недопустимые слова")
         return value
@@ -122,27 +101,12 @@ class ClanSerializer(serializers.ModelSerializer):
         value = value or ""
         if contains_profanity(value):
             raise serializers.ValidationError("В требованиях недопустимые слова")
-        if len(value) > 500:
-            raise serializers.ValidationError("Слишком длинные требования")
-        return value
-
-    def validate_max_members(self, value):
-        if value is not None and value < 2:
-            raise serializers.ValidationError("Минимум 2 участника или пусто (без лимита)")
-        if value is not None and value > 500:
-            raise serializers.ValidationError("Слишком большой лимит")
-        return value
-
-    def validate_min_playtime_hours(self, value):
-        if value is not None and value > 50000:
-            raise serializers.ValidationError("Слишком большой порог часов")
         return value
 
     def validate(self, attrs):
         request = self.context["request"]
         if self.instance is None:
-            owned = Clan.objects.filter(owner=request.user).count()
-            if owned >= MAX_CLANS_OWNED:
+            if Clan.objects.filter(owner=request.user).count() >= MAX_CLANS_OWNED:
                 raise serializers.ValidationError(
                     {"detail": f"Нельзя создать больше {MAX_CLANS_OWNED} кланов"}
                 )
