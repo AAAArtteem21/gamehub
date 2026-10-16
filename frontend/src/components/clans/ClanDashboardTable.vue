@@ -21,6 +21,7 @@ const roleLabels = {
 const canModerate = computed(
   () => props.myRole === 'leader' || props.myRole === 'officer'
 )
+const isLeader = computed(() => props.myRole === 'leader')
 
 function fmtHours(minutes) {
   const m = Number(minutes) || 0
@@ -71,6 +72,32 @@ async function banUser(row) {
     toast.error(e.response?.data?.detail || 'Не удалось забанить')
   }
 }
+
+async function promoteUser(row) {
+  if (!isLeader.value || row.role === 'leader') return
+  const next = row.role === 'member' ? 'officer' : null
+  if (!next) return
+  if (!confirm(`Повысить «${row.username}» до офицера?`)) return
+  try {
+    await clansApi.changeRole(props.clanId, row.user_id, next)
+    toast.success('Роль обновлена')
+    emit('reload')
+  } catch (e) {
+    toast.error(e.response?.data?.detail || 'Не удалось повысить')
+  }
+}
+
+async function demoteUser(row) {
+  if (!isLeader.value || row.role === 'leader' || row.role === 'member') return
+  if (!confirm(`Понизить «${row.username}» до участника?`)) return
+  try {
+    await clansApi.changeRole(props.clanId, row.user_id, 'member')
+    toast.success('Роль обновлена')
+    emit('reload')
+  } catch (e) {
+    toast.error(e.response?.data?.detail || 'Не удалось понизить')
+  }
+}
 </script>
 
 <template>
@@ -111,6 +138,22 @@ async function banUser(row) {
             <td class="muted">{{ fmtDate(row.joined_at) }}</td>
             <td v-if="canModerate" class="actions">
               <template v-if="row.role !== 'leader'">
+                <button
+                  v-if="isLeader && row.role === 'member'"
+                  type="button"
+                  class="btn-ghost btn-sm"
+                  @click="promoteUser(row)"
+                >
+                  ↑ Офицер
+                </button>
+                <button
+                  v-if="isLeader && row.role === 'officer'"
+                  type="button"
+                  class="btn-ghost btn-sm"
+                  @click="demoteUser(row)"
+                >
+                  ↓ Участник
+                </button>
                 <button type="button" class="btn-ghost btn-sm" @click="kickUser(row)">
                   Кик
                 </button>

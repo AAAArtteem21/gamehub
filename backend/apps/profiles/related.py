@@ -1,5 +1,6 @@
 from __future__ import annotations
 from urllib.parse import quote
+from django.core.cache import cache
 
 
 def steam32_to_64(account_id) -> str:
@@ -23,7 +24,6 @@ def related_games_for_steam32(steam32: str, *, current: str = "") -> list[dict]:
     raw = str(steam32 or "").strip()
     if not raw:
         return []
-    # всегда Steam32 для dota/deadlock
     sid = steam64_to_32(raw) if raw.startswith("7656119") else raw
     try:
         sid = str(int(sid))
@@ -49,9 +49,35 @@ def related_games_for_steam32(steam32: str, *, current: str = "") -> list[dict]:
             "external_id": sid,
             "path": f"/players/guest/deadlock/{sid}",
         },
-        # Faceit: без steam64 в path — отдельный lookup на бэке по steam, иначе 404
-        # пока не ведём на faceit из steam32, пока guest не резолвит steam→ник
     ]
+
+    # Faceit по Steam64 (кэш 6ч, negative 1ч)
+    steam64 = steam32_to_64(sid)
+    if steam64 and cur != "faceit":
+        neg_key = f"faceit_neg_by_steam:{steam64}"
+        pos_key = f"faceit_nick_by_steam:{steam64}"
+        nick = cache.get(pos_key)
+        if nick is None and not cache.get(neg_key):
+            try:
+                from .integrations.faceit_client import FaceitClient
+                player = FaceitClient().get_player_by_steam_id(steam64)
+                nick = (player or {}).get("nickname")
+                if nick:
+                    cache.set(pos_key, nick, timeout=6 * 3600)
+                else:
+                    cache.set(neg_key, True, timeout=3600)
+            except Exception:
+                cache.set(neg_key, True, timeout=3600)
+                nick = None
+        if nick:
+            candidates.append({
+                "game": "faceit",
+                "label": "Faceit CS2",
+                "platform": "faceit",
+                "external_id": nick,
+                "path": f"/players/guest/faceit/{quote(str(nick), safe='')}",
+            })
+
     return [c for c in candidates if c["game"] != cur]
 
 
