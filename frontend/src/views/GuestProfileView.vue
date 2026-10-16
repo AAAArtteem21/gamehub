@@ -394,18 +394,30 @@ function openRelated(r) {
 
 const isProfileEmpty = computed(() => {
   if (!profile.value) return false
-  if (profile.value.is_empty) return true
-  if (profile.value.detail_hint) return true
-  const w = profile.value.wins || 0
-  const l = profile.value.losses || 0
+  if (profile.value.is_empty === true) return true
+  const w = Number(profile.value.wins) || 0
+  const l = Number(profile.value.losses) || 0
   const hist = profile.value.match_history || []
   const ds = profile.value.display_stats
-  if (w === 0 && l === 0 && !hist.length) {
-    if (ds?.match_history?.length) return false
-    if (game.value === 'deadlock' && (ds || profile.value.tier)) return false
-    return true
+  if (ds?.metrics?.length || ds?.match_history?.length) return false
+  if (hist.length) return false
+  if (w > 0 || l > 0) return false
+  // Deadlock: tier/badge есть — не «скрыт»
+  if (game.value === 'deadlock' && (profile.value.tier || profile.value.badge != null)) {
+    return false
   }
-  return false
+  return true
+})
+
+const emptyHint = computed(() => {
+  if (profile.value?.detail_hint) return profile.value.detail_hint
+  if (game.value === 'deadlock') {
+    return 'По этому Steam ID пока нет матчей Deadlock в API (или мало данных). Это не «профиль скрыт».'
+  }
+  if (game.value === 'dota2' || game.value === 'opendota') {
+    return 'Нет публичных матчей OpenDota (профиль Steam может быть скрыт) — или игрок почти не играл. Related-игры ниже всё равно можно открыть.'
+  }
+  return 'Статистика пустая: нет матчей или данные недоступны.'
 })
 
 function showMoreHistory() {
@@ -646,8 +658,7 @@ watch(() => [route.params.game, route.params.externalId], () => load())
       </div>
 
       <div v-if="isProfileEmpty" class="card empty-hint-card">
-        Статистика недоступна: профиль скрыт в Steam/OpenDota, нет публичных матчей
-        или игрок не найден. Это не ошибка сайта.
+        {{ emptyHint }}
       </div>
 
       <div class="card stats-card" v-else-if="hasDisplayStats">

@@ -20,10 +20,16 @@ def steam64_to_32(steam_id) -> str:
 
 
 def related_games_for_steam32(steam32: str, *, current: str = "") -> list[dict]:
-    sid = str(steam32 or "").strip()
-    if not sid:
+    raw = str(steam32 or "").strip()
+    if not raw:
         return []
-    steam64 = steam32_to_64(sid)
+    # всегда Steam32 для dota/deadlock
+    sid = steam64_to_32(raw) if raw.startswith("7656119") else raw
+    try:
+        sid = str(int(sid))
+    except (TypeError, ValueError):
+        return []
+
     cur = (current or "").lower()
     if cur in ("opendota", "dota"):
         cur = "dota2"
@@ -43,13 +49,8 @@ def related_games_for_steam32(steam32: str, *, current: str = "") -> list[dict]:
             "external_id": sid,
             "path": f"/players/guest/deadlock/{sid}",
         },
-        {
-            "game": "faceit",
-            "label": "Faceit (CS2)",
-            "platform": "faceit",
-            "external_id": steam64 or sid,
-            "path": f"/players/guest/faceit/{steam64 or sid}",
-        },
+        # Faceit: без steam64 в path — отдельный lookup на бэке по steam, иначе 404
+        # пока не ведём на faceit из steam32, пока guest не резолвит steam→ник
     ]
     return [c for c in candidates if c["game"] != cur]
 
