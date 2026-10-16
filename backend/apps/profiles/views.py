@@ -805,6 +805,10 @@ class GuestProfileView(APIView):
         }, status=200)
 
     def _faceit_guest(self, external_id):
+        """
+        Гостевой Faceit CS2: как _sync_faceit — K/D/A, карта, verdict, won, ELO Δ.
+        related_games по Steam32. Пустые данные → 200, не 404.
+        """
         from datetime import datetime
         from .integrations.faceit_client import FaceitClient, FaceitError
         from .serivces import build_display_stats
@@ -822,154 +826,436 @@ class GuestProfileView(APIView):
                 try:
                     player = client.get_player_by_nickname(raw)
                 except FaceitError:
-                    player = client.get_player(raw)
+                    # UUID player_id
+                    if len(raw) >= 32 and "-" in raw:
+                        player = client.get_player(raw)
+                    else:
+                        raise
         except FaceitError as e:
-            return Response({"detail": str(e)}, status=404)
+            return Response(
+                {
+                    "is_public": True,
+                    "display_name": raw,
+                    "avatar_url": None,
+                    "is_gamehub_user": False,
+                    "gamehub_user_id": None,
+                    "wins": 0,
+                    "losses": 0,
+                    "winrate": 0,
+                    "tier": None,
+                    "skill_rating": None,
+                    "match_history": [],
+                    "related_games": [],
+                    "empty_reason": str(e) or "Faceit не найден",
+                    "display_stats": build_display_stats("faceit", {
+                        "matches": 0, "wins": 0, "winrate": 0, "match_history": [],
+                    }),
+                },
+                status=200,
+            )
         except Exception:
-            return Response({"detail": "Faceit не найден"}, status=404)
+            return Response(
+                {
+                    "is_public": True,
+                    "display_name": raw,
+                    "avatar_url": None,
+                    "is_gamehub_user": False,
+                    "gamehub_user_id": None,
+                    "wins": 0,
+                    "losses": 0,
+                    "winrate": 0,
+                    "tier": None,
+                    "skill_rating": None,
+                    "match_history": [],
+                    "related_games": [],
+                    "empty_reason": "Faceit недоступен",
+                    "display_stats": build_display_stats("faceit", {
+                        "matches": 0, "wins": 0, "winrate": 0, "match_history": [],
+                    }),
+                },
+                status=200,
+            )
 
         if not player:
-            return Response({"detail": "Faceit не найден"}, status=404)
+            return Response(
+                {
+                    "is_public": True,
+                    "display_name": raw,
+                    "avatar_url": None,
+                    "is_gamehub_user": False,
+                    "gamehub_user_id": None,
+                    "wins": 0,
+                    "losses": 0,
+                    "winrate": 0,
+                    "tier": None,
+                    "skill_rating": None,
+                    "match_history": [],
+                    "related_games": [],
+                    "empty_reason": "Faceit не найден",
+                    "display_stats": build_display_stats("faceit", {
+                        "matches": 0, "wins": 0, "winrate": 0, "match_history": [],
+                    }),
+                },
+                status=200,
+            )
 
         pid = player.get("player_id")
         nick = player.get("nickname") or raw
-        steam32 = None
         games = player.get("games") or {}
-        cs = games.get("cs2") or games.get("csgo") or {}
+        game_id = "cs2"
+        cs = games.get("cs2") or {}
+        if not cs:
+            game_id = "csgo"
+            cs = games.get("csgo") or {}
+
+        steam32 = None
         gp = str(cs.get("game_player_id") or "")
         if gp.startswith("7656119"):
             steam32 = steam64_to_32(gp)
         elif raw.startswith("7656119"):
             steam32 = steam64_to_32(raw)
 
-        stats = {}
+        def _to_int(v, default=0):
+            try:
+                return int(float(str(v).replace(",", ".")))
+            except (TypeError, ValueError):
+                return default
+
+        def _to_float(v, default=None):
+            if v is None or v == "":
+                return default
+            try:
+                return float(str(v).replace(",", "."))
+            except (TypeError, ValueError):
+                return default
+
+        def _sget(stats, *keys, default=None):
+            for k in keys:
+                if k in stats and stats[k] not in (None, ""):
+                    return stats[k]
+            return default
+
+        # --- lifetime ---
+        lifetime = {}
+        top_maps = []
+        matches_total = wins = 0
+        winrate = kd = hs = None
+        adr = entry_rate = kr = None
+
         try:
-            stats = client.get_player_stats(pid, "cs2") or {}
+            stats_payload = client.get_player_stats(pid, game_id) or {}
+            lifetime = stats_payload.get("lifetime") or {}
+            segments = stats_payload.get("segments") or []
+
+            def L(*keys, default=None):
+                for k in keys:
+                    if k in lifetime and lifetime[k] not in (None, ""):
+                        return lifetime[k]
+                return default
+
+            matches_total = _to_int(L("Matches", "matches", default=0))
+            wins = _to_int(L("Wins", "wins", default=0))
+            wr_raw = L("Win Rate %", "Winrate %", "winrate")
+            kd_raw = L("Average K/D Ratio", "K/D Ratio", "K/D", "kd")
+            hs_raw = L("Average Headshots %", "Headshots %", "HS %")
+
+            winrate = _to_float(wr_raw)
+            if winrate is None and matches_total:
+                winrate = round(wins / matches_total * 100, 1)
+            elif winrate is not None:
+                winrate = round(winrate, 1)
+            else:
+                winrate = 0
+
+            kd = _to_float(kd_raw, None)
+            if kd is not None:
+                kd = round(kd, 2)
+            hs = _to_float(hs_raw, None)
+            if hs is not None:
+                hs = round(hs, 1)
+            adr = _to_float(L("ADR", "Average Damage per Round", "Damage/Round"))
+            if adr is not None:
+                adr = round(adr, 1)
+            entry_rate = _to_float(L("Entry Success Rate", "Entry Rate %"))
+            if entry_rate is not None:
+                entry_rate = round(entry_rate, 1)
+            kr = _to_float(L("K/R Ratio", "Average K/R Ratio", "Kills/Round"))
+            if kr is not None:
+                kr = round(kr, 2)
+
+            for seg in segments:
+                label = (seg.get("label") or "").strip()
+                st = seg.get("stats") or {}
+                is_map = (
+                    (seg.get("type") or "").lower() == "map"
+                    or label.lower().startswith("de_")
+                    or label.lower().startswith("cs_")
+                )
+                if not is_map or not label:
+                    continue
+                m_matches = _to_int(st.get("Matches") or st.get("matches") or 0)
+                if m_matches <= 0:
+                    continue
+                m_wins = _to_int(st.get("Wins") or st.get("wins") or 0)
+                m_wr = _to_float(st.get("Win Rate %") or st.get("Winrate %"))
+                if m_wr is None and m_matches:
+                    m_wr = round(m_wins / m_matches * 100, 1)
+                top_maps.append({
+                    "name": label,
+                    "matches": m_matches,
+                    "games": m_matches,
+                    "winrate": m_wr if m_wr is not None else 0,
+                    "wr": m_wr if m_wr is not None else 0,
+                })
+            top_maps.sort(key=lambda x: x["matches"], reverse=True)
+            top_maps = top_maps[:8]
         except Exception:
             pass
 
-        # per-match stats (kills/deaths) если API отдаёт
-        per_match = {}
-        try:
-            recent_stats = client.get_recent_match_stats(pid, "cs2", limit=20) or {}
-            items_st = recent_stats.get("items") or []
-            if isinstance(recent_stats, list):
-                items_st = recent_stats
-            for row in items_st:
-                if not isinstance(row, dict):
-                    continue
-                mid = row.get("match_id") or (row.get("stats") or {}).get("match_id")
-                st = row.get("stats") or row
-                if not mid:
-                    continue
-                try:
-                    k = int(float(str(st.get("Kills") or st.get("kills") or 0)))
-                    d = int(float(str(st.get("Deaths") or st.get("deaths") or 0)))
-                    a = int(float(str(st.get("Assists") or st.get("assists") or 0)))
-                except (TypeError, ValueError):
-                    k = d = a = 0
-                per_match[str(mid)] = (k, d, a)
-        except Exception:
-            pass
+        losses = max(matches_total - wins, 0) if matches_total else 0
 
-        history = []
+        skill_level = cs.get("skill_level")
+        faceit_elo = cs.get("faceit_elo") or player.get("faceit_elo")
         try:
-            hist = client.get_history(pid, game="cs2", limit=20) or {}
-            items = hist.get("items") if isinstance(hist, dict) else hist
-            if not isinstance(items, list):
+            skill_level = int(skill_level) if skill_level is not None else None
+        except (TypeError, ValueError):
+            skill_level = None
+        try:
+            faceit_elo = int(faceit_elo) if faceit_elo is not None else None
+        except (TypeError, ValueError):
+            faceit_elo = None
+
+        # --- match history: recent stats first (K/D/A + map), fallback history ---
+        match_history = []
+        items = []
+        try:
+            recent = client.get_recent_match_stats(pid, game_id, limit=20) or {}
+            items = recent.get("items") or []
+            if isinstance(recent, list):
+                items = recent
+        except Exception:
+            items = []
+
+        if not items:
+            try:
+                hist = client.get_history(pid, game=game_id, limit=20) or {}
+                items = hist.get("items") or []
+            except Exception:
                 items = []
-            for m in items[:20]:
-                if not isinstance(m, dict):
-                    continue
-                mid = m.get("match_id")
-                teams = m.get("teams") or {}
-                results = m.get("results") or {}
+
+        for item in items[:20]:
+            if not isinstance(item, dict):
+                continue
+            stats = item.get("stats") or {}
+            if not isinstance(stats, dict):
+                stats = {}
+
+            match_id = (
+                item.get("match_id")
+                or item.get("matchId")
+                or _sget(stats, "Match Id", "match_id", "Match ID")
+                or item.get("id")
+            )
+            if match_id is not None:
+                match_id = str(match_id).strip() or None
+
+            result = _sget(stats, "Result", "result", "Game Result") or item.get("result")
+            won = None
+            if str(result) in ("1", "Win", "win", "W"):
+                won = True
+            elif str(result) in ("0", "Loss", "loss", "L"):
+                won = False
+            # fallback: history API results.winner
+            if won is None:
+                results = item.get("results") or {}
                 winner = results.get("winner")
-                score = results.get("score") or {}
+                teams = item.get("teams") or {}
+                # player team membership rarely available without roster — leave None
 
-                # в какой команде был игрок
-                my_faction = None
-                for fk in ("faction1", "faction2"):
-                    roster = (teams.get(fk) or {}).get("players") or (teams.get(fk) or {}).get("roster") or []
-                    for p in roster:
-                        if not isinstance(p, dict):
-                            continue
-                        if p.get("player_id") == pid or (p.get("nickname") or "").lower() == (nick or "").lower():
-                            my_faction = fk
-                            break
-                    if my_faction:
-                        break
+            kills = _sget(stats, "Kills", "kills") or "0"
+            deaths = _sget(stats, "Deaths", "deaths") or "0"
+            assists = _sget(stats, "Assists", "assists") or "0"
+            kd_m = _sget(stats, "K/D Ratio", "K/D", "kd")
+            hs_m = _sget(stats, "Headshots %", "HS %", "Headshots")
+            map_name = (
+                _sget(stats, "Map", "map")
+                or item.get("map")
+                or item.get("competition_name")
+                or (item.get("game_id") or game_id).upper()
+            )
+            score = _sget(stats, "Score", "score")
+            if not score:
+                results = item.get("results") or {}
+                sc = results.get("score") or {}
+                if isinstance(sc, dict) and sc:
+                    score = f"{sc.get('faction1', '?')}:{sc.get('faction2', '?')}"
 
-                won = None
-                if winner and my_faction:
-                    won = str(winner) == str(my_faction)
-
-                s1 = score.get("faction1")
-                s2 = score.get("faction2")
-                score_str = f"{s1}:{s2}" if s1 is not None and s2 is not None else ""
-
-                kda = per_match.get(str(mid))
-                if kda:
-                    subtitle = f"{kda[0]}/{kda[1]}/{kda[2]}"
-                    if score_str:
-                        subtitle = f"{subtitle} · {score_str}"
-                else:
-                    subtitle = score_str or (m.get("game_mode") or "5v5")
-
+            # если нет K/D из stats (чистый history) — subtitle = score
+            has_kda = str(kills) not in ("0", "") or str(deaths) not in ("0", "")
+            if not has_kda and not _sget(stats, "Kills", "kills"):
+                # history item without per-player stats
+                if won is None and results.get("winner"):
+                    # cannot know player side reliably
+                    pass
+                subtitle = score or "—"
+                title = map_name if map_name and not str(map_name).startswith("Europe") else (
+                    item.get("competition_name") or map_name or "Match"
+                )
+                # try map from voting if present (rare in history list)
                 played_at = None
-                ts = m.get("finished_at") or m.get("started_at")
-                if ts is not None:
+                date_raw = (
+                    item.get("finished_at")
+                    or item.get("started_at")
+                    or item.get("date")
+                    or _sget(stats, "Date")
+                )
+                if date_raw is not None:
                     try:
-                        ts = int(ts)
-                        if ts > 10_000_000_000:
+                        ts = int(date_raw)
+                        if ts > 1e12:
                             ts = ts // 1000
                         played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
                     except Exception:
-                        played_at = None
-
-                history.append({
+                        played_at = str(date_raw)[:10]
+                match_history.append({
                     "won": won,
-                    "title": m.get("competition_name") or "Match",
+                    "title": title,
                     "subtitle": subtitle,
-                    "match_id": mid,
+                    "duration": None,
+                    "match_id": match_id,
                     "played_at": played_at,
+                    "verdict": None,
+                    "elo_change": None,
+                    "solo": None,
+                    "details": [
+                        {"label": "Счёт", "value": score or "—"},
+                        {"label": "Карта", "value": map_name or "—"},
+                    ],
                 })
-        except Exception:
-            pass
+                continue
 
-        life = (stats.get("lifetime") or {}) if isinstance(stats, dict) else {}
+            played_at = None
+            date_raw = (
+                item.get("date")
+                or item.get("finished_at")
+                or item.get("started_at")
+                or _sget(stats, "Date")
+            )
+            if date_raw is not None:
+                try:
+                    ts = int(date_raw)
+                    if ts > 1e12:
+                        ts = ts // 1000
+                    played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
+                except Exception:
+                    played_at = str(date_raw)[:10]
 
-        def _num(key_list, default=0):
-            for k in key_list:
-                if k in life and life[k] not in (None, ""):
-                    try:
-                        return float(str(life[k]).replace("%", "").replace(",", "."))
-                    except (TypeError, ValueError):
-                        pass
-            return default
+            verdict = None
+            try:
+                kd_f = float(str(kd_m).replace(",", ".")) if kd_m is not None else None
+                if kd_f is None:
+                    k_i, d_i, a_i = _to_int(kills), _to_int(deaths), _to_int(assists)
+                    kd_f = (k_i + a_i) / max(d_i, 1)
+                if kd_f >= 1.4:
+                    verdict = {"label": "Great", "tone": "great"}
+                elif kd_f >= 1.1:
+                    verdict = {"label": "Good", "tone": "good"}
+                elif kd_f >= 0.85:
+                    verdict = {"label": "OK", "tone": "neutral"}
+                elif kd_f >= 0.6:
+                    verdict = {"label": "Bad", "tone": "bad"}
+                else:
+                    verdict = {"label": "Rough", "tone": "terrible"}
+            except Exception:
+                verdict = None
 
-        wins = int(_num(["Wins", "wins"], 0))
-        matches = int(_num(["Matches", "matches"], 0))
-        losses = max(matches - wins, 0) if matches else 0
-        winrate = round(wins / matches * 100, 1) if matches else 0
-        # иногда Faceit отдаёт Win Rate % напрямую
-        wr_life = _num(["Win Rate %", "Win Rate", "win_rate"], None)
-        if wr_life is not None and matches:
-            winrate = round(wr_life, 1)
+            elo_raw = (
+                _sget(stats, "Elo", "ELO", "Rating", "Elo Change", "elo_change")
+                or item.get("elo")
+                or item.get("elo_change")
+            )
+            elo_change = None
+            if elo_raw is not None and str(elo_raw).strip() != "":
+                try:
+                    elo_change = int(float(str(elo_raw).replace(",", ".").replace("+", "")))
+                except (TypeError, ValueError):
+                    elo_change = None
 
-        elo = (cs.get("faceit_elo") if isinstance(cs, dict) else None) or player.get("faceit_elo")
-        level = cs.get("skill_level") if isinstance(cs, dict) else None
+            details = [
+                {"label": "Счёт", "value": score or "—"},
+                {"label": "K/D", "value": kd_m or "—"},
+                {"label": "HS %", "value": hs_m or "—"},
+                {"label": "Карта", "value": map_name},
+            ]
+            elo_sub = ""
+            if elo_change is not None:
+                sign = "+" if elo_change > 0 else ""
+                details.insert(0, {"label": "ELO", "value": f"{sign}{elo_change}"})
+                elo_sub = f" · {sign}{elo_change} ELO"
+
+            match_history.append({
+                "won": won,
+                "title": map_name,
+                "subtitle": (
+                    f"{kills}/{deaths}/{assists}"
+                    + (f" · KD {kd_m}" if kd_m else "")
+                    + elo_sub
+                ),
+                "duration": None,
+                "match_id": match_id,
+                "played_at": played_at,
+                "verdict": verdict,
+                "elo_change": elo_change,
+                "solo": None,
+                "details": details,
+            })
+
+        form = []
+        for m in match_history[:10]:
+            if m.get("won") is True:
+                form.append("W")
+            elif m.get("won") is False:
+                form.append("L")
+
+        # avg recent
+        n = sum_k = sum_d = sum_a = 0
+        for m in match_history[:20]:
+            parts = (m.get("subtitle") or "").split("·")[0].strip().split("/")
+            if len(parts) >= 3:
+                sum_k += _to_int(parts[0])
+                sum_d += _to_int(parts[1])
+                sum_a += _to_int(parts[2].split()[0] if parts[2] else 0)
+                n += 1
+        avg_kills = round(sum_k / n, 1) if n else None
+        avg_deaths = round(sum_d / n, 1) if n else None
+        avg_assists = round(sum_a / n, 1) if n else None
+        avg_kd = round((sum_k + sum_a) / max(sum_d, 1), 2) if n else None
 
         extra = {
+            "player_id": pid,
+            "game_id": game_id,
+            "skill_level": skill_level,
+            "faceit_elo": faceit_elo,
+            "matches": matches_total or len(match_history),
             "wins": wins,
             "losses": losses,
-            "matches": matches,
-            "winrate": winrate,
-            "faceit_elo": elo,
-            "skill_level": level,
-            "match_history": history,
-            "lifetime": life,
-            "player_id": pid,
+            "winrate": winrate if winrate is not None else 0,
+            "kd": kd,
+            "hs_percent": hs,
+            "avg_kills": avg_kills,
+            "avg_deaths": avg_deaths,
+            "avg_assists": avg_assists,
+            "avg_kd_recent": avg_kd,
+            "adr": adr,
+            "entry_success": entry_rate,
+            "kr": kr,
+            "sample_size": n,
+            "lifetime": lifetime,
+            "top_maps": top_maps,
+            "recent_form": form,
+            "match_history": match_history,
+            "country": player.get("country"),
+            "avatar": player.get("avatar"),
         }
 
         gh = (
@@ -983,6 +1269,14 @@ class GuestProfileView(APIView):
 
         related = related_games_for_steam32(steam32, current="faceit") if steam32 else []
 
+        tier = None
+        if skill_level is not None and faceit_elo is not None:
+            tier = f"Lvl {skill_level} · {faceit_elo} ELO"
+        elif skill_level is not None:
+            tier = f"Lvl {skill_level}"
+        elif faceit_elo is not None:
+            tier = f"{faceit_elo} ELO"
+
         return Response({
             "is_public": True,
             "display_name": nick,
@@ -991,12 +1285,15 @@ class GuestProfileView(APIView):
             "gamehub_user_id": gh.user_id if gh else None,
             "wins": wins,
             "losses": losses,
-            "winrate": winrate,
-            "tier": f"Lvl {level} · {elo} ELO" if level is not None else (f"{elo} ELO" if elo else None),
-            "skill_rating": elo,
-            "match_history": history,
+            "winrate": winrate if winrate is not None else 0,
+            "tier": tier,
+            "skill_rating": faceit_elo,
+            "match_history": match_history,
             "related_games": related,
-            "empty_reason": None if matches or history else "Нет статистики CS2 на Faceit",
+            "empty_reason": (
+                None if (matches_total or match_history)
+                else "Нет статистики CS2 на Faceit"
+            ),
             "display_stats": build_display_stats("faceit", extra),
         })
 

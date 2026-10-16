@@ -1,3 +1,4 @@
+
 import api from './axios'
 
 export const clansApi = {
@@ -12,7 +13,10 @@ export const clansApi = {
     api.post(`clans/${id}/kick/`, { user_id: userId, reason }),
   ban: (id, userId, reason = '') =>
     api.post(`clans/${id}/ban/`, { user_id: userId, reason }),
-  unban: (id, userId) => api.post(`clans/${id}/unban/`, { user_id: userId }),
+  unban: (id, userId) =>
+    api.post(`clans/${id}/unban/`, { user_id: userId }),
+  changeRole: (id, userId, role) =>
+    api.post(`clans/${id}/change_role/`, { user_id: userId, role }),
   modLog: (id) => api.get(`clans/${id}/mod_log/`),
   bans: (id) => api.get(`clans/${id}/bans/`),
   uploadLogo: (id, formData) =>
