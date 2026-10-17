@@ -7,7 +7,9 @@ from datetime import timedelta
 class LFGPost(models.Model):
     STATUS_CHOICES = [("open", "Open"), ("closed", "Closed")]
 
-    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lfg_posts")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lfg_posts"
+    )
     game = models.CharField(max_length=50)
     datetime = models.DateTimeField()
     description = models.TextField(blank=True)
@@ -19,14 +21,40 @@ class LFGPost(models.Model):
     def __str__(self):
         return f"{self.game} — {self.author}"
 
+    @property
+    def accepted_count(self):
+        return self.responses.filter(status="accepted").count()
+
+    def refresh_slots_status(self):
+        """Закрыть пост, если набрали accepted >= slots_needed."""
+        if self.status == "open" and self.accepted_count >= self.slots_needed:
+            self.status = "closed"
+            self.save(update_fields=["status"])
+            return True
+        return False
+
 
 class LFGResponse(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("accepted", "Accepted"),
+        ("rejected", "Rejected"),
+        ("withdrawn", "Withdrawn"),
+    ]
+
     post = models.ForeignKey(LFGPost, on_delete=models.CASCADE, related_name="responses")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    message = models.CharField(max_length=300, blank=True, default="")
+    preferred_role = models.CharField(max_length=50, blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("post", "user")
+
+    def __str__(self):
+        return f"{self.user} → {self.post_id} ({self.status})"
 
 
 class LFGChatMessage(models.Model):
@@ -38,8 +66,11 @@ class LFGChatMessage(models.Model):
     class Meta:
         ordering = ["created_at"]
 
+
 class ContactReveal(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="revealed_contacts")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="revealed_contacts"
+    )
     post = models.ForeignKey(LFGPost, on_delete=models.CASCADE, related_name="reveals")
     contact = models.CharField(max_length=100)
     revealed_at = models.DateTimeField(auto_now_add=True)

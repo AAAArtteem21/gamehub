@@ -22,7 +22,17 @@ class LFGPostViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = (
             LFGPost.objects.select_related("author", "author__profile")
-            .annotate(responses_count_annotated=Count("responses"))
+            .annotate(
+                accepted_count_annotated=Count(
+                    "responses", filter=Q(responses__status="accepted")
+                ),
+                pending_count_annotated=Count(
+                    "responses", filter=Q(responses__status="pending")
+                ),
+                responses_count_annotated=Count(
+                    "responses", filter=Q(responses__status="accepted")
+                ),
+            )
             .order_by("-created_at")
         )
         game = self.request.query_params.get("game")
@@ -58,17 +68,135 @@ class LFGPostViewSet(viewsets.ModelViewSet):
         post.save(update_fields=["status"])
         return Response(self.get_serializer(post).data)
 
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    def applications(self, request, pk=None):
+        """Список заявок на пост — только автор."""
+        post = self.get_object()
+        if post.author_id != request.user.id:
+            return Response({"detail": "Только автор"}, status=status.HTTP_403_FORBIDDEN)
+        qs = (
+            post.responses.select_related("user", "user__profile")
+            .exclude(status="withdrawn")
+            .order_by("status", "-created_at")
+        )
+        # pending сверху
+        qs = sorted(
+            qs,
+            key=lambda r: (0 if r.status == "pending" else 1, -r.created_at.timestamp()),
+        )
+        return Response(LFGResponseSerializer(qs, many=True, context={"request": request}).data)
+
 
 class LFGResponseViewSet(viewsets.ModelViewSet):
     serializer_class = LFGResponseSerializer
     permission_classes = [permissions.IsAuthenticated, IsResponseOwnerOrReadOnly]
+    http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
-        qs = LFGResponse.objects.select_related("user", "user__profile", "post")
+        qs = LFGResponse.objects.select_related(
+            "user", "user__profile", "post", "post__author", "post__author__profile"
+        )
         post_id = self.request.query_params.get("post")
         if post_id:
             qs = qs.filter(post_id=post_id)
+        # обычный list: свои заявки или заявки на свои посты
+        if not post_id:
+            user = self.request.user
+            qs = qs.filter(
+                Q(user=user) | Q(post__author=user)
+            ).exclude(status="withdrawn")
         return qs
+
+    def destroy(self, request, *args, **kwargs):
+        """Отозвать свою pending-заявку или кик accepted автором."""
+        obj = self.get_object()
+        user = request.user
+        if obj.user_id == user.id:
+            if obj.status not in ("pending", "accepted"):
+                return Response({"detail": "Нельзя отозвать"}, status=400)
+            obj.status = "withdrawn"
+            obj.decided_at = timezone.now()
+            obj.save(update_fields=["status", "decided_at"])
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if obj.post.author_id == user.id:
+            # автор убирает игрока
+            obj.status = "rejected"
+            obj.decided_at = timezone.now()
+            obj.save(update_fields=["status", "decided_at"])
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({"detail": "Нет прав"}, status=403)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def accept(self, request, pk=None):
+        resp = self.get_object()
+        post = resp.post
+        if post.author_id != request.user.id:
+            return Response({"detail": "Только автор"}, status=403)
+        if resp.status != "pending":
+            return Response({"detail": "Заявка уже обработана"}, status=400)
+        if post.status == "closed":
+            return Response({"detail": "Пост закрыт"}, status=400)
+
+        resp.status = "accepted"
+        resp.decided_at = timezone.now()
+        resp.save(update_fields=["status", "decided_at"])
+
+        # открыть контакт принятому
+        ContactReveal.objects.update_or_create(
+            user=resp.user,
+            post=post,
+            defaults={
+                "contact": post.contact,
+                "expires_at": timezone.now() + timedelta(hours=24),
+            },
+        )
+
+        post.refresh_slots_status()
+
+        try:
+            from apps.users.services import notify
+            notify(
+                resp.user,
+                kind="lfg_accepted",
+                title="Заявка принята",
+                body=f"Тебя взяли в «{post.game}» · {post.datetime:%d.%m %H:%M}",
+                link=f"/lfg/{post.id}",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            LFGResponseSerializer(resp, context={"request": request}).data
+        )
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def reject(self, request, pk=None):
+        resp = self.get_object()
+        post = resp.post
+        if post.author_id != request.user.id:
+            return Response({"detail": "Только автор"}, status=403)
+        if resp.status != "pending":
+            return Response({"detail": "Заявка уже обработана"}, status=400)
+
+        resp.status = "rejected"
+        resp.decided_at = timezone.now()
+        resp.save(update_fields=["status", "decided_at"])
+
+        try:
+            from apps.users.services import notify
+            notify(
+                resp.user,
+                kind="lfg_rejected",
+                title="Заявка отклонена",
+                body=f"По «{post.game}» заявка отклонена",
+                link=f"/lfg/{post.id}",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            LFGResponseSerializer(resp, context={"request": request}).data
+        )
 
 
 class LFGChatMessageViewSet(viewsets.ModelViewSet):
@@ -82,6 +210,29 @@ class LFGChatMessageViewSet(viewsets.ModelViewSet):
         if post_id:
             qs = qs.filter(post_id=post_id)
         return qs
+
+
+class MyApplicationsView(APIView):
+    """
+    Ближайшие матчи, на которые подал заявку (pending + accepted).
+    Сортировка по datetime поста.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now() - timedelta(hours=2)
+        qs = (
+            LFGResponse.objects.filter(
+                user=request.user,
+                status__in=["pending", "accepted"],
+                post__datetime__gte=now,
+            )
+            .select_related("post", "post__author", "post__author__profile", "user", "user__profile")
+            .order_by("post__datetime")
+        )
+        return Response(
+            LFGResponseSerializer(qs, many=True, context={"request": request}).data
+        )
 
 
 class MyNotificationsView(APIView):
@@ -108,9 +259,12 @@ class MyChatThreadsView(APIView):
 
     def get(self, request):
         user = request.user
+        # чат только у author + accepted
         post_ids = set(LFGPost.objects.filter(author=user).values_list("id", flat=True))
         post_ids |= set(
-            LFGResponse.objects.filter(user=user).values_list("post_id", flat=True)
+            LFGResponse.objects.filter(user=user, status="accepted").values_list(
+                "post_id", flat=True
+            )
         )
 
         threads = []
@@ -138,6 +292,12 @@ class QuickStatsView(APIView):
         user = request.user
         return Response({
             "open_lfg": LFGPost.objects.filter(author=user, status="open").count(),
+            "pending_applications": LFGResponse.objects.filter(
+                post__author=user, status="pending"
+            ).count(),
+            "my_pending": LFGResponse.objects.filter(
+                user=user, status="pending"
+            ).count(),
             "unread_chats": 0,
             "clans_count": ClanMembership.objects.filter(user=user).count(),
         })

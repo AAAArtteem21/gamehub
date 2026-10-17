@@ -13,6 +13,7 @@ import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const posts = ref([])
+const myApps = ref([])
 const loading = ref(true)
 const loadingMore = ref(false)
 const nextPageUrl = ref(null)
@@ -52,6 +53,19 @@ async function loadPosts() {
   }
 }
 
+async function loadMyApps() {
+  if (!authStore.isAuthenticated) {
+    myApps.value = []
+    return
+  }
+  try {
+    const res = await lfgApi.myApplications()
+    myApps.value = res.data || []
+  } catch {
+    myApps.value = []
+  }
+}
+
 async function loadMore() {
   if (!nextPageUrl.value || loadingMore.value) return
   loadingMore.value = true
@@ -73,13 +87,15 @@ function openCreate() {
 }
 
 async function respond(postId) {
-  if (!authStore.requireAuth('Войди через Steam, чтобы откликнуться.')) return false
+  if (!authStore.requireAuth('Войди через Steam, чтобы подать заявку.')) return false
   await lfgApi.respond(postId)
   const post = posts.value.find((p) => p.id === postId)
   if (post) {
-    post.responses_count += 1
     post.has_responded = true
+    post.my_response_status = 'pending'
+    post.pending_count = (post.pending_count || 0) + 1
   }
+  await loadMyApps()
   chatSidebarRef.value?.loadThreads()
   return true
 }
@@ -90,8 +106,8 @@ function onPostCreated(newPost) {
 
 function openChat(threadOrPost) {
   chatPost.value = {
-    id: threadOrPost.post_id ?? threadOrPost.id,
-    game: threadOrPost.game,
+    id: threadOrPost.post_id ?? threadOrPost.id ?? threadOrPost.post,
+    game: threadOrPost.game ?? threadOrPost.post_game,
   }
 }
 
@@ -116,6 +132,16 @@ function scrollFilters(dir) {
   filtersEl.value?.scrollBy({ left: dir * 280, behavior: 'smooth' })
 }
 
+function formatAppWhen(dt) {
+  if (!dt) return '—'
+  return new Date(dt).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 watch(searchTerm, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(loadPosts, 350)
@@ -124,6 +150,7 @@ watch(searchTerm, () => {
 onMounted(() => {
   if (route.query.search) searchTerm.value = route.query.search
   loadPosts()
+  loadMyApps()
   if (route.query.create) openCreate()
 })
 
@@ -178,7 +205,7 @@ onUnmounted(() => clearTimeout(searchTimer))
         <label class="toggle" :class="{ on: hideResponded }">
           <input type="checkbox" v-model="hideResponded" />
           <span class="toggle-box" />
-          Скрыть мои отклики
+          Скрыть мои заявки
         </label>
 
         <button v-if="hasActiveFilters" type="button" class="reset-btn" @click="resetFilters">
@@ -287,11 +314,46 @@ onUnmounted(() => clearTimeout(searchTimer))
 
       <!-- Правая колонка -->
       <aside class="side-col">
-        <ChatSidebar v-if="authStore.isAuthenticated" ref="chatSidebarRef" @open-thread="openChat" />
+        <!-- Ближайшие матчи (мои заявки) -->
+        <div v-if="authStore.isAuthenticated" class="card side-card my-apps">
+          <h3>
+            <svg class="sh-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+            Ближайшие матчи
+          </h3>
+          <div v-if="!myApps.length" class="apps-empty">Нет активных заявок</div>
+          <div v-else class="apps-list">
+            <div v-for="a in myApps" :key="a.id" class="app-row">
+              <div class="app-row-top">
+                <span class="app-game">{{ a.post_game }}</span>
+                <span class="app-st" :class="a.status">
+                  {{ a.status === 'accepted' ? 'Принят' : 'Ожидает' }}
+                </span>
+              </div>
+              <div class="app-when">{{ formatAppWhen(a.post_datetime) }}</div>
+              <button
+                v-if="a.status === 'accepted'"
+                type="button"
+                class="app-chat"
+                @click="openChat({ id: a.post, game: a.post_game })"
+              >
+                Чат
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <ChatSidebar
+          v-if="authStore.isAuthenticated"
+          ref="chatSidebarRef"
+          @open-thread="openChat"
+        />
 
         <div v-else class="card side-card login-card">
-          <h3>Чаты и отклики</h3>
-          <p>Войди через Steam, чтобы откликаться на заявки и общаться с тиммейтами.</p>
+          <h3>Чаты и заявки</h3>
+          <p>Войди через Steam, чтобы подавать заявки и общаться с тиммейтами.</p>
           <button type="button" class="btn-primary btn-sm" @click="authStore.loginWithSteam()">
             Войти через Steam
           </button>
@@ -308,15 +370,24 @@ onUnmounted(() => clearTimeout(searchTimer))
           <ol class="steps">
             <li>
               <span class="step-n">1</span>
-              <div><b>Выбери игру</b><span>Отфильтруй заявки или найди по тексту.</span></div>
+              <div>
+                <b>Выбери игру</b>
+                <span>Отфильтруй заявки или найди по тексту.</span>
+              </div>
             </li>
             <li>
               <span class="step-n">2</span>
-              <div><b>Откликнись</b><span>Автор увидит твою статистику.</span></div>
+              <div>
+                <b>Подай заявку</b>
+                <span>Автор увидит профиль и статистику.</span>
+              </div>
             </li>
             <li>
               <span class="step-n">3</span>
-              <div><b>Договоритесь в чате</b><span>Чат откроется сразу после отклика.</span></div>
+              <div>
+                <b>После принятия</b>
+                <span>Откроются контакт и чат.</span>
+              </div>
             </li>
           </ol>
         </div>
@@ -729,6 +800,70 @@ onUnmounted(() => clearTimeout(searchTimer))
   color: var(--accent);
   background: var(--accent-dim);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* —— Ближайшие матчи —— */
+.my-apps .apps-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.apps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app-row {
+  padding: 10px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.app-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.app-game {
+  font-weight: 700;
+  font-size: 12px;
+}
+.app-st {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.app-st.pending {
+  color: #e8b84a;
+  background: rgba(232, 184, 74, 0.12);
+}
+.app-st.accepted {
+  color: var(--success);
+  background: rgba(106, 170, 124, 0.12);
+}
+.app-when {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 4px;
+}
+.app-chat {
+  margin-top: 8px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.app-chat:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 @media (max-width: 1000px) {
