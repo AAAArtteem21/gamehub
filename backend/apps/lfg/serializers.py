@@ -12,21 +12,76 @@ def user_has_synced_account(user):
     return GameAccount.objects.filter(user=user, verified=True).exists()
 
 
+def _profile_snapshot(user):
+    """Краткий снимок профиля для карточки заявки у автора."""
+    profile = getattr(user, "profile", None)
+    avatar = profile.avatar_url if profile else None
+    games = []
+    try:
+        from apps.profiles.models import GameAccount
+        for ga in GameAccount.objects.filter(user=user, verified=True).order_by("platform")[:6]:
+            games.append({
+                "platform": ga.platform,
+                "nickname": ga.nickname or ga.external_id,
+                "skill_rating": ga.skill_rating,
+                "game_label": ga.game_label or ga.platform,
+            })
+    except Exception:
+        pass
+    return {
+        "id": user.id,
+        "username": user_public_name(user),
+        "avatar_url": avatar,
+        "games": games,
+    }
+
+
 class LFGResponseSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
     user_id = serializers.IntegerField(source="user.id", read_only=True)
+    profile = serializers.SerializerMethodField()
+    post_game = serializers.CharField(source="post.game", read_only=True)
+    post_datetime = serializers.DateTimeField(source="post.datetime", read_only=True)
+    post_status = serializers.CharField(source="post.status", read_only=True)
+    post_author = serializers.SerializerMethodField()
+    post_author_id = serializers.IntegerField(source="post.author_id", read_only=True)
 
     class Meta:
         model = LFGResponse
-        fields = ["id", "post", "user", "user_id", "created_at"]
-        read_only_fields = ["user", "user_id", "created_at"]
+        fields = [
+            "id", "post", "user", "user_id", "profile",
+            "message", "preferred_role", "status",
+            "created_at", "decided_at",
+            "post_game", "post_datetime", "post_status",
+            "post_author", "post_author_id",
+        ]
+        read_only_fields = [
+            "user", "user_id", "profile", "status",
+            "created_at", "decided_at",
+            "post_game", "post_datetime", "post_status",
+            "post_author", "post_author_id",
+        ]
 
     def get_user(self, obj):
         return user_public_name(obj.user)
 
+    def get_profile(self, obj):
+        return _profile_snapshot(obj.user)
+
+    def get_post_author(self, obj):
+        return user_public_name(obj.post.author)
+
     def validate_post(self, value):
         if value.status == "closed":
             raise serializers.ValidationError("Заявка уже закрыта")
+        return value
+
+    def validate_message(self, value):
+        value = (value or "").strip()
+        if len(value) > 300:
+            raise serializers.ValidationError("Макс 300 символов")
+        if value:
+            validate_no_profanity(value)
         return value
 
     def validate(self, attrs):
@@ -37,43 +92,29 @@ class LFGResponseSerializer(serializers.ModelSerializer):
             )
         post = attrs["post"]
         if LFGResponse.objects.filter(post=post, user=request.user).exists():
-            raise serializers.ValidationError("Уже откликнулся")
+            raise serializers.ValidationError("Уже подал заявку")
         if post.author_id == request.user.id:
             raise serializers.ValidationError("Нельзя на свою заявку")
         return attrs
 
     def create(self, validated_data):
         validated_data["user"] = self.context["request"].user
+        validated_data["status"] = "pending"
         response = super().create(validated_data)
-        post = response.post
-        reveal, created = ContactReveal.objects.get_or_create(
-            user=response.user,
-            post=post,
-            defaults={
-                "contact": post.contact,
-                "expires_at": timezone.now() + timedelta(hours=1),
-            },
-        )
-        if not created:
-            reveal.contact = post.contact
-            reveal.expires_at = timezone.now() + timedelta(hours=1)
-            reveal.save(update_fields=["contact", "expires_at"])
-        if post.responses.count() >= post.slots_needed:
-            post.status = "closed"
-            post.save(update_fields=["status"])
+        # контакт НЕ открываем до accept
         try:
             from apps.users.services import notify
             from apps.users.xp import add_xp, XP_LFG_RESPONSE
             ru = self.context["request"].user
-            if post.author_id != ru.id:
+            if response.post.author_id != ru.id:
                 notify(
-                    post.author,
+                    response.post.author,
                     kind="lfg_response",
-                    title="Новый отклик",
-                    body=f"{user_public_name(ru)} откликнулся на «{post.game}»",
-                    link=f"/lfg/{post.id}",
+                    title="Новая заявка в LFG",
+                    body=f"{user_public_name(ru)} хочет в «{response.post.game}»",
+                    link=f"/lfg/{response.post_id}",
                 )
-            add_xp(ru, XP_LFG_RESPONSE, reason="отклик LFG")
+            add_xp(ru, XP_LFG_RESPONSE, reason="заявка LFG")
         except Exception:
             pass
         return response
@@ -84,7 +125,10 @@ class LFGPostSerializer(serializers.ModelSerializer):
     author_id = serializers.IntegerField(source="author.id", read_only=True)
     author_avatar = serializers.SerializerMethodField()
     responses_count = serializers.SerializerMethodField()
+    accepted_count = serializers.SerializerMethodField()
+    pending_count = serializers.SerializerMethodField()
     has_responded = serializers.SerializerMethodField()
+    my_response_status = serializers.SerializerMethodField()
     is_author = serializers.SerializerMethodField()
 
     class Meta:
@@ -92,7 +136,8 @@ class LFGPostSerializer(serializers.ModelSerializer):
         fields = [
             "id", "author", "author_id", "author_avatar", "game", "datetime",
             "description", "contact", "slots_needed", "status", "created_at",
-            "responses_count", "has_responded", "is_author",
+            "responses_count", "accepted_count", "pending_count",
+            "has_responded", "my_response_status", "is_author",
         ]
         read_only_fields = ["author", "status", "created_at"]
 
@@ -104,13 +149,31 @@ class LFGPostSerializer(serializers.ModelSerializer):
         return profile.avatar_url if profile else None
 
     def get_responses_count(self, obj):
-        return getattr(obj, "responses_count_annotated", None) or obj.responses.count()
+        # для слотов считаем accepted; в annotate может не быть — fallback
+        return getattr(obj, "accepted_count_annotated", None) or obj.accepted_count
+
+    def get_accepted_count(self, obj):
+        return getattr(obj, "accepted_count_annotated", None) or obj.accepted_count
+
+    def get_pending_count(self, obj):
+        return getattr(obj, "pending_count_annotated", None) or obj.responses.filter(
+            status="pending"
+        ).count()
 
     def get_has_responded(self, obj):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
-        return obj.responses.filter(user=request.user).exists()
+        return obj.responses.filter(user=request.user).exclude(
+            status="withdrawn"
+        ).exists()
+
+    def get_my_response_status(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        r = obj.responses.filter(user=request.user).first()
+        return r.status if r else None
 
     def get_is_author(self, obj):
         request = self.context.get("request")
@@ -179,7 +242,23 @@ class LFGPostSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if not (self.get_is_author(instance) or self.get_has_responded(instance)):
+        # контакт только автору или принятому игроку
+        request = self.context.get("request")
+        can_see = False
+        if request and request.user.is_authenticated:
+            if instance.author_id == request.user.id:
+                can_see = True
+            elif instance.responses.filter(
+                user=request.user, status="accepted"
+            ).exists():
+                can_see = True
+            else:
+                # legacy ContactReveal (если ещё жив)
+                from django.utils import timezone as tz
+                can_see = ContactReveal.objects.filter(
+                    user=request.user, post=instance, expires_at__gt=tz.now()
+                ).exists()
+        if not can_see:
             data["contact"] = None
         return data
 
@@ -214,12 +293,13 @@ class LFGChatMessageSerializer(serializers.ModelSerializer):
 
     def validate_post(self, value):
         request = self.context["request"]
+        # чат: автор или accepted
         ok = (
             value.author_id == request.user.id
-            or value.responses.filter(user=request.user).exists()
+            or value.responses.filter(user=request.user, status="accepted").exists()
         )
         if not ok:
-            raise serializers.ValidationError("Чат только для участников")
+            raise serializers.ValidationError("Чат только после принятия заявки")
         return value
 
     def create(self, validated_data):

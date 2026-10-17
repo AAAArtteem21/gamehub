@@ -36,6 +36,12 @@ async function handleRespond() {
     setTimeout(() => { state.value = 'idle' }, 2000)
   }
 }
+
+const statusLabel = {
+  pending: 'Ожидает',
+  accepted: 'Принят',
+  rejected: 'Отклонён',
+}
 </script>
 
 <template>
@@ -47,7 +53,13 @@ async function handleRespond() {
         <span class="lfg-game-name">{{ post.game }}</span>
         <div class="badges">
           <span class="slots-badge">
-            {{ post.responses_count }}/{{ post.slots_needed }}
+            {{ post.accepted_count ?? post.responses_count }}/{{ post.slots_needed }}
+          </span>
+          <span
+            v-if="post.pending_count > 0 && post.is_author"
+            class="pending-badge"
+          >
+            {{ post.pending_count }} заяв{{ post.pending_count === 1 ? 'ка' : 'ки' }}
           </span>
           <span v-if="post.status === 'closed'" class="closed-badge">Закрыта</span>
           <span v-else class="lfg-time-badge">{{ timeUntil(post.datetime) }}</span>
@@ -84,7 +96,12 @@ async function handleRespond() {
         class="contact-row locked"
         v-else-if="post.status !== 'closed' && !post.is_author"
       >
-        Контакт после отклика
+        <template v-if="post.my_response_status === 'pending'">
+          Контакт откроется после принятия
+        </template>
+        <template v-else>
+          Контакт после принятия заявки
+        </template>
       </div>
     </div>
 
@@ -97,20 +114,37 @@ async function handleRespond() {
         :disabled="state === 'loading' || state === 'done'"
         @click.stop="handleRespond"
       >
-        <span v-if="state === 'idle'">Откликнуться</span>
+        <span v-if="state === 'idle'">Подать заявку</span>
         <span v-else-if="state === 'loading'" class="spinner"></span>
         <span v-else-if="state === 'done'">Отправлено</span>
         <span v-else-if="state === 'error'">Ошибка</span>
       </button>
 
+      <span
+        v-if="post.my_response_status && !post.is_author"
+        class="my-status"
+        :class="post.my_response_status"
+      >
+        {{ statusLabel[post.my_response_status] || post.my_response_status }}
+      </span>
+
       <button
-        v-if="post.has_responded || post.is_author"
+        v-if="post.my_response_status === 'accepted' || post.is_author"
         type="button"
         class="btn-chat"
         @click.stop="emit('open-chat', post)"
       >
         Чат
       </button>
+
+      <RouterLink
+        v-if="post.is_author"
+        :to="`/lfg/${post.id}`"
+        class="btn-lobby"
+        @click.stop
+      >
+        Заявки
+      </RouterLink>
     </div>
   </div>
 </template>
@@ -125,14 +159,9 @@ async function handleRespond() {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
 }
-.lfg-card.closed {
-  opacity: 0.55;
-}
+.lfg-card.closed { opacity: 0.55; }
 
-.lfg-main {
-  flex: 1;
-  min-width: 0;
-}
+.lfg-main { flex: 1; min-width: 0; }
 
 .lfg-top {
   display: flex;
@@ -158,7 +187,8 @@ async function handleRespond() {
 
 .slots-badge,
 .lfg-time-badge,
-.closed-badge {
+.closed-badge,
+.pending-badge {
   font-size: 10px;
   font-weight: 600;
   padding: 2px 7px;
@@ -179,6 +209,11 @@ async function handleRespond() {
 .closed-badge {
   color: var(--danger);
   background: rgba(201, 122, 114, 0.12);
+}
+.pending-badge {
+  color: #e8b84a;
+  background: rgba(232, 184, 74, 0.12);
+  border: 1px solid rgba(232, 184, 74, 0.3);
 }
 
 .lfg-description {
@@ -208,9 +243,7 @@ async function handleRespond() {
   color: var(--text-secondary);
   font-size: 12px;
 }
-.author-link:hover {
-  color: var(--accent);
-}
+.author-link:hover { color: var(--accent); }
 .author-avatar {
   width: 20px;
   height: 20px;
@@ -243,23 +276,20 @@ async function handleRespond() {
   gap: 8px;
   align-items: center;
 }
-.contact-label {
-  color: var(--text-muted);
-}
+.contact-label { color: var(--text-muted); }
 .contact-value {
   color: var(--success);
   font-weight: 600;
   font-family: var(--font-mono);
 }
-.contact-row.locked {
-  color: var(--text-muted);
-}
+.contact-row.locked { color: var(--text-muted); }
 
 .lfg-actions {
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
+  align-items: stretch;
 }
 
 .btn-respond {
@@ -292,11 +322,30 @@ async function handleRespond() {
   border-color: var(--danger);
   color: var(--danger);
 }
-.btn-respond:disabled {
-  cursor: default;
+.btn-respond:disabled { cursor: default; }
+
+.my-status {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+}
+.my-status.pending {
+  color: #e8b84a;
+  background: rgba(232, 184, 74, 0.12);
+}
+.my-status.accepted {
+  color: var(--success);
+  background: rgba(106, 170, 124, 0.12);
+}
+.my-status.rejected {
+  color: var(--danger);
+  background: rgba(201, 122, 114, 0.12);
 }
 
-.btn-chat {
+.btn-chat,
+.btn-lobby {
   background: var(--bg-sunken);
   border: 1px solid var(--border-color);
   color: var(--text-primary);
@@ -307,8 +356,15 @@ async function handleRespond() {
   cursor: pointer;
   min-width: 120px;
   height: 34px;
+  text-align: center;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
-.btn-chat:hover {
+.btn-chat:hover,
+.btn-lobby:hover {
   border-color: var(--border-hover);
 }
 
@@ -320,25 +376,11 @@ async function handleRespond() {
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 600px) {
-  .lfg-card {
-    flex-direction: column;
-    gap: 10px;
-  }
-  .lfg-actions {
-    flex-direction: row;
-    width: 100%;
-  }
-  .btn-respond, .btn-chat {
-    flex: 1;
-    min-width: 0;
-  }
+  .lfg-card { flex-direction: column; gap: 10px; }
+  .lfg-actions { flex-direction: row; width: 100%; flex-wrap: wrap; }
+  .btn-respond, .btn-chat, .btn-lobby { flex: 1; min-width: 0; }
 }
 </style>
