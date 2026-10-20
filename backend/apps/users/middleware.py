@@ -14,13 +14,13 @@ class SecurityHeadersMiddleware:
 
         path = (request.path or "").lower()
 
-        is_steam = (
+        is_auth = (
             path.startswith("/auth/")
-            or "steam" in path
-            or path.endswith("/login/steam/")
+            or "login/steam" in path
+            or path.rstrip("/").endswith("/steam")
         )
 
-        if is_steam:
+        if is_auth:
             response["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
