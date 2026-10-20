@@ -31,15 +31,7 @@ def get_csrf_token(request):
 
 @ensure_csrf_cookie
 def steam_start(request):
-    token = get_token(request)
-    html = f"""<!doctype html>
-<html><body>
-<form id="f" method="post" action="/auth/login/steam/">
-  <input type="hidden" name="csrfmiddlewaretoken" value="{token}">
-</form>
-<script>document.getElementById('f').submit()</script>
-</body></html>"""
-    return HttpResponse(html)
+    return redirect("/auth/login/steam/")
 
 
 class MeView(generics.RetrieveUpdateAPIView):
