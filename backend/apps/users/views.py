@@ -1,55 +1,74 @@
 from django.shortcuts import redirect
-from rest_framework import generics,permissions,status
+from rest_framework import generics, permissions, status
 from rest_framework.authtoken.models import Token
-from rest_framework.response import Response 
+from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.http import JsonResponse
-from rest_framework.authentication import SessionAuthentication
-from django.contrib.auth import get_user
-from django.contrib.auth import get_user_model
+from django.http import JsonResponse, HttpResponse
+from django.contrib.auth import get_user, get_user_model
 from django.db.models import Q
-from .xp import get_or_create_profile, progress_payload, add_xp, XP_REFERRAL_INVITER, XP_REFERRAL_INVITEE
-from .services import notify
-from django.contrib.auth import get_user_model
-from .models import UserProfile,Notification
-from .serializers import UserProfileSerializer
 from django.middleware.csrf import get_token
-from django.http import HttpResponse
 from django.conf import settings
 from django.db import connection
+
+from .xp import (
+    get_or_create_profile,
+    progress_payload,
+    add_xp,
+    XP_REFERRAL_INVITER,
+    XP_REFERRAL_INVITEE,
+)
+from .services import notify
+from .models import UserProfile, Notification
+from .serializers import UserProfileSerializer
+from .auth_cookies import set_auth_cookie, clear_auth_cookie
+
 
 @ensure_csrf_cookie
 def get_csrf_token(request):
     return JsonResponse({"detail": "CSRF cookie set"})
 
+
 @ensure_csrf_cookie
 def steam_start(request):
     token = get_token(request)
     html = f"""<!doctype html>
+<html><body>
 <form id="f" method="post" action="/auth/login/steam/">
   <input type="hidden" name="csrfmiddlewaretoken" value="{token}">
 </form>
-<script>document.getElementById('f').submit()</script>"""
+<script>document.getElementById('f').submit()</script>
+</body></html>"""
     return HttpResponse(html)
 
 
 class MeView(generics.RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
-    permission_classes =[permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
-        return profile 
-    
+        return profile
+
+
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self,request):
+    def post(self, request):
         Token.objects.filter(user=request.user).delete()
-        return Response({'detail':'Вы успешно вышли из аккаунта'},status=status.HTTP_200_OK)
-    
+        response = Response(
+            {"detail": "Вы успешно вышли из аккаунта"},
+            status=status.HTTP_200_OK,
+        )
+        clear_auth_cookie(response)
+        return response
+
+
 class SteamAuthCompleteView(APIView):
+    """
+    После Steam: токен только в HttpOnly cookie.
+    В URL и JSON токен больше НЕ отдаём.
+    """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -58,22 +77,25 @@ class SteamAuthCompleteView(APIView):
         if not user.is_authenticated:
             return Response(
                 {"detail": "Пользователь не найден"},
-                status=401
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         token, _ = Token.objects.get_or_create(user=user)
 
-        return redirect(
-            f"{settings.FRONTEND_URL}/auth/callback?token={token.key}"
-        )
-    
+        response = redirect(f"{settings.FRONTEND_URL}/auth/callback")
+        set_auth_cookie(response, token.key)
+        return response
+
+
 class SteamAuthErrorView(APIView):
     permission_classes = [permissions.AllowAny]
-    def get(self,request):
+
+    def get(self, request):
         return Response(
-            {'detail':'Не удалось найти аккаунт стим попробуйте     позже'},
-            status=status.HTTP_400_BAD_REQUEST
+            {"detail": "Не удалось войти через Steam, попробуйте позже"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
+
 
 class PlayerSearchView(APIView):
     """GET /api/players/search/?q=be"""
@@ -86,22 +108,25 @@ class PlayerSearchView(APIView):
             return Response([])
 
         qs = (
-            User.objects
-            .filter(
-                Q(username__icontains=q) |
-                Q(profile__display_name__icontains=q)  # если related_name другой — поправь
+            User.objects.filter(
+                Q(username__icontains=q)
+                | Q(profile__display_name__icontains=q)
             )
-            .select_related("profile")  # или "profile" — как в модели
+            .select_related("profile")
             .distinct()[:8]
         )
 
         data = []
         for u in qs:
-            profile = getattr(u, "profile", None) or getattr(u, "profile", None)
+            profile = getattr(u, "profile", None)
             data.append({
                 "id": u.id,
                 "username": u.username,
-                "display_name": (profile.display_name if profile and getattr(profile, "display_name", None) else u.username),
+                "display_name": (
+                    profile.display_name
+                    if profile and getattr(profile, "display_name", None)
+                    else u.username
+                ),
                 "avatar_url": getattr(profile, "avatar_url", None) if profile else None,
             })
         return Response(data)
@@ -137,6 +162,7 @@ class NotificationReadView(APIView):
         updated = qs.update(read=True)
         return Response({"ok": True, "updated": updated})
 
+
 class ProgressView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -156,12 +182,22 @@ class ReferralClaimView(APIView):
 
         me = get_or_create_profile(request.user)
         if me.referred_by_id:
-            return Response({"detail": "Реферал уже активирован"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Реферал уже активирован"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if me.referral_code and me.referral_code.upper() == code:
-            return Response({"detail": "Нельзя ввести свой код"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Нельзя ввести свой код"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        inviter_profile = UserProfile.objects.filter(referral_code__iexact=code).select_related("user").first()
+        inviter_profile = (
+            UserProfile.objects.filter(referral_code__iexact=code)
+            .select_related("user")
+            .first()
+        )
         if not inviter_profile:
             return Response({"detail": "Код не найден"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -180,7 +216,10 @@ class ReferralClaimView(APIView):
                 inviter_profile.user,
                 kind="referral",
                 title="Реферал сработал",
-                body=f"{request.user.username} пришёл по твоему коду · +{XP_REFERRAL_INVITER} XP",
+                body=(
+                    f"{request.user.username} пришёл по твоему коду "
+                    f"· +{XP_REFERRAL_INVITER} XP"
+                ),
                 link="/profile",
             )
         except Exception:
@@ -192,11 +231,11 @@ class ReferralClaimView(APIView):
             "progress": progress_payload(me),
         })
 
+
 def health(request):
     try:
         connection.ensure_connection()
         db = "ok"
     except Exception:
-        db = "error"
-        return JsonResponse({"status": "error", "db": db}, status=503)
+        return JsonResponse({"status": "error", "db": "error"}, status=503)
     return JsonResponse({"status": "ok", "db": db})

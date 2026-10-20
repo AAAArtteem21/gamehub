@@ -79,7 +79,6 @@ class LFGPostViewSet(viewsets.ModelViewSet):
             .exclude(status="withdrawn")
             .order_by("status", "-created_at")
         )
-        # pending сверху
         qs = sorted(
             qs,
             key=lambda r: (0 if r.status == "pending" else 1, -r.created_at.timestamp()),
@@ -99,7 +98,6 @@ class LFGResponseViewSet(viewsets.ModelViewSet):
         post_id = self.request.query_params.get("post")
         if post_id:
             qs = qs.filter(post_id=post_id)
-        # обычный list: свои заявки или заявки на свои посты
         if not post_id:
             user = self.request.user
             qs = qs.filter(
@@ -119,7 +117,6 @@ class LFGResponseViewSet(viewsets.ModelViewSet):
             obj.save(update_fields=["status", "decided_at"])
             return Response(status=status.HTTP_204_NO_CONTENT)
         if obj.post.author_id == user.id:
-            # автор убирает игрока
             obj.status = "rejected"
             obj.decided_at = timezone.now()
             obj.save(update_fields=["status", "decided_at"])
@@ -141,7 +138,6 @@ class LFGResponseViewSet(viewsets.ModelViewSet):
         resp.decided_at = timezone.now()
         resp.save(update_fields=["status", "decided_at"])
 
-        # открыть контакт принятому
         ContactReveal.objects.update_or_create(
             user=resp.user,
             post=post,
@@ -259,7 +255,6 @@ class MyChatThreadsView(APIView):
 
     def get(self, request):
         user = request.user
-        # чат только у author + accepted
         post_ids = set(LFGPost.objects.filter(author=user).values_list("id", flat=True))
         post_ids |= set(
             LFGResponse.objects.filter(user=user, status="accepted").values_list(

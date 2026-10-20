@@ -101,7 +101,6 @@ class LFGResponseSerializer(serializers.ModelSerializer):
         validated_data["user"] = self.context["request"].user
         validated_data["status"] = "pending"
         response = super().create(validated_data)
-        # контакт НЕ открываем до accept
         try:
             from apps.users.services import notify
             from apps.users.xp import add_xp, XP_LFG_RESPONSE
@@ -149,7 +148,6 @@ class LFGPostSerializer(serializers.ModelSerializer):
         return profile.avatar_url if profile else None
 
     def get_responses_count(self, obj):
-        # для слотов считаем accepted; в annotate может не быть — fallback
         return getattr(obj, "accepted_count_annotated", None) or obj.accepted_count
 
     def get_accepted_count(self, obj):
@@ -242,7 +240,6 @@ class LFGPostSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # контакт только автору или принятому игроку
         request = self.context.get("request")
         can_see = False
         if request and request.user.is_authenticated:
@@ -253,7 +250,6 @@ class LFGPostSerializer(serializers.ModelSerializer):
             ).exists():
                 can_see = True
             else:
-                # legacy ContactReveal (если ещё жив)
                 from django.utils import timezone as tz
                 can_see = ContactReveal.objects.filter(
                     user=request.user, post=instance, expires_at__gt=tz.now()
@@ -293,7 +289,6 @@ class LFGChatMessageSerializer(serializers.ModelSerializer):
 
     def validate_post(self, value):
         request = self.context["request"]
-        # чат: автор или accepted
         ok = (
             value.author_id == request.user.id
             or value.responses.filter(user=request.user, status="accepted").exists()

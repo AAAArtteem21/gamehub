@@ -295,12 +295,10 @@ class ComparePlayersView(APIView):
             losses = as_int(s.get("matches_lost"), None)
         matches_extra = as_int(s.get("matches"), None)
 
-        # Faceit: lifetime Matches + Wins → losses
         if (losses is None or losses == 0) and matches_extra and wins is not None:
             if matches_extra > wins:
                 losses = matches_extra - wins
 
-        # история, если всё ещё пусто
         if (wins is None or wins == 0) and (losses is None or losses == 0) and history:
             wins = sum(1 for m in history if m.get("won") is True)
             losses = sum(1 for m in history if m.get("won") is False)
@@ -695,7 +693,6 @@ class ComparePlayersView(APIView):
             ratio = round((k_sum + a_sum) / max(d_sum, 1), 2)
             avg_kda = f"{round(k_sum/n,1)}/{round(d_sum/n,1)}/{round(a_sum/n,1)} ({ratio})"
 
-        # steam name optional
         display = aid
         avatar = None
         try:
@@ -816,7 +813,6 @@ class WeeklyReportView(APIView):
             else:
                 counting_streak = False
 
-        # daily buckets
         daily_map = {}
         cur = week_start
         while cur <= today:

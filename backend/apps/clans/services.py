@@ -32,7 +32,6 @@ def get_users_playtime(user_ids):
     if not user_ids:
         return result
 
-    # Последняя дата по (user, appid)
     latest = (
         DailySnapshot.objects.filter(game_account__user_id__in=user_ids)
         .values("game_account__user_id", "appid")
@@ -45,7 +44,7 @@ def get_users_playtime(user_ids):
     if not date_map:
         return result
 
-    # Тянем только «последние» строки
+
     from django.db.models import Q
     q = Q()
     for (uid, appid), d in date_map.items():
@@ -68,7 +67,6 @@ def get_users_playtime(user_ids):
             result[uid]["two_weeks"] += max(int(s.playtime_2weeks or 0), 0)
             used_2w = True
 
-    # Если ни у кого нет playtime_2weeks — старый алгоритм по датам
     if not used_2w:
         today = dj_timezone.now().date()
         two_weeks_ago = today - timedelta(days=14)

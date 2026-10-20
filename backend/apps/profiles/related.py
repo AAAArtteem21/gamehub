@@ -51,7 +51,6 @@ def related_games_for_steam32(steam32: str, *, current: str = "") -> list[dict]:
         },
     ]
 
-    # Faceit по Steam64 (кэш 6ч, negative 1ч)
     steam64 = steam32_to_64(sid)
     if steam64 and cur != "faceit":
         neg_key = f"faceit_neg_by_steam:{steam64}"

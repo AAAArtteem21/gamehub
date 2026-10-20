@@ -1,21 +1,20 @@
 <script setup>
 import { onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
-const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
 onMounted(async () => {
-  const token = route.query.token
-  if (token) {
-    authStore.setToken(token)
+  // Токен уже в HttpOnly cookie (выставил бэкенд при redirect).
+  // Никакого route.query.token и localStorage.
+  try {
     await authStore.fetchMe()
     const back = sessionStorage.getItem('post_login_redirect') || '/'
     sessionStorage.removeItem('post_login_redirect')
     router.replace(back)
-  } else {
+  } catch {
     router.replace('/login')
   }
 })

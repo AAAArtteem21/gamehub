@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import Clan, ClanMembership
 
-# если модели есть в profiles — поправь импорты
+
 try:
     from apps.profiles.models import ClanActivity, ClanMessage
 except ImportError:

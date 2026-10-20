@@ -89,9 +89,6 @@ class TestPostListFiltering:
         assert len(data) == 1
 
     def test_invalid_status_value_returns_empty_not_error(self, api_client, user):
-        # Текущее поведение: произвольная строка в status тихо фильтрует в пустоту.
-        # Возможно, стоит валидировать значение через ChoiceFilter вместо
-        # query_params.get, но пока фиксируем как есть.
         make_post(user, status='open')
         resp = api_client.get(post_list_url(), {'status': 'not_a_real_status'})
         data = resp.data['results'] if 'results' in resp.data else resp.data
