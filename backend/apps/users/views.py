@@ -31,7 +31,34 @@ def get_csrf_token(request):
 
 @ensure_csrf_cookie
 def steam_start(request):
-    return redirect("/auth/login/steam/")
+    token = get_token(request)
+    html = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Вход через Steam</title>
+  <style>
+    body {{
+      margin: 0; min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; font-family: system-ui, sans-serif;
+      background: #12100c; color: #e8e4dc;
+    }}
+    button {{
+      background: #c4a574; color: #12100c; border: none;
+      padding: 14px 28px; border-radius: 10px; font-weight: 700;
+      font-size: 15px; cursor: pointer;
+    }}
+  </style>
+</head>
+<body>
+  <form method="post" action="/auth/login/steam/">
+    <input type="hidden" name="csrfmiddlewaretoken" value="{token}">
+    <button type="submit">Продолжить вход через Steam</button>
+  </form>
+</body>
+</html>"""
+    return HttpResponse(html)
 
 
 class MeView(generics.RetrieveUpdateAPIView):
