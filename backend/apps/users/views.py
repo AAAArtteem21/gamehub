@@ -66,10 +66,6 @@ class LogoutView(APIView):
 
 
 class SteamAuthCompleteView(APIView):
-    """
-    После Steam: токен только в HttpOnly cookie.
-    В URL и JSON токен больше НЕ отдаём.
-    """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -83,7 +79,9 @@ class SteamAuthCompleteView(APIView):
 
         token, _ = Token.objects.get_or_create(user=user)
 
-        response = redirect(f"{settings.FRONTEND_URL}/auth/callback")
+        response = redirect(
+            f"{settings.FRONTEND_URL}/auth/callback?token={token.key}"
+        )
         set_auth_cookie(response, token.key)
         return response
 
