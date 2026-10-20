@@ -74,7 +74,6 @@ class GameAccountViewSet(viewsets.ModelViewSet):
         platform = request.data.get("platform")
         external_id = (request.data.get("external_id") or "").strip()
 
-        # Steam: никогда не создаём второй аккаунт — синкаем существующий
         if platform == "steam":
             existing = GameAccount.objects.filter(
                 user=request.user, platform="steam"
@@ -225,7 +224,7 @@ class PublicProfileView(APIView):
     def get(self, request, user_id):
         from django.contrib.auth import get_user_model
         from .models import GameAccount
-        from .serivces import build_display_stats  # если файл services.py — from .services import ...
+        from .serivces import build_display_stats
 
         User = get_user_model()
         try:
@@ -235,7 +234,7 @@ class PublicProfileView(APIView):
 
         profile = getattr(target, "profile", None)
 
-        # --- прогресс GH (без реф-кода) ---
+
         progress = None
         if profile is not None:
             level = getattr(profile, "level", 1) or 1
@@ -243,7 +242,7 @@ class PublicProfileView(APIView):
             xp_per = getattr(profile, "xp_per_level", None) or 100
             if xp_per <= 0:
                 xp_per = 100
-            # если хранится xp_into_level — используй его, иначе посчитай
+
             xp_into = getattr(profile, "xp_into_level", None)
             if xp_into is None:
                 xp_into = xp_total % xp_per
@@ -259,7 +258,6 @@ class PublicProfileView(APIView):
                 "tags": list(tags) if tags else [],
             }
 
-        # --- просмотры (опционально) ---
         views_count = 0
         try:
             from apps.users.models import ProfileView
@@ -269,7 +267,7 @@ class PublicProfileView(APIView):
         except Exception:
             pass
 
-        # --- аккаунты + display_stats ---
+
         accounts_qs = (
             GameAccount.objects.filter(user=target).order_by("-created_at")
         )
@@ -826,7 +824,6 @@ class GuestProfileView(APIView):
                 try:
                     player = client.get_player_by_nickname(raw)
                 except FaceitError:
-                    # UUID player_id
                     if len(raw) >= 32 and "-" in raw:
                         player = client.get_player(raw)
                     else:
@@ -935,7 +932,6 @@ class GuestProfileView(APIView):
                     return stats[k]
             return default
 
-        # --- lifetime ---
         lifetime = {}
         top_maps = []
         matches_total = wins = 0
@@ -1025,7 +1021,6 @@ class GuestProfileView(APIView):
         except (TypeError, ValueError):
             faceit_elo = None
 
-        # --- match history: recent stats first (K/D/A + map), fallback history ---
         match_history = []
         items = []
         try:
@@ -1065,12 +1060,11 @@ class GuestProfileView(APIView):
                 won = True
             elif str(result) in ("0", "Loss", "loss", "L"):
                 won = False
-            # fallback: history API results.winner
+
             if won is None:
                 results = item.get("results") or {}
                 winner = results.get("winner")
                 teams = item.get("teams") or {}
-                # player team membership rarely available without roster — leave None
 
             kills = _sget(stats, "Kills", "kills") or "0"
             deaths = _sget(stats, "Deaths", "deaths") or "0"
@@ -1090,18 +1084,14 @@ class GuestProfileView(APIView):
                 if isinstance(sc, dict) and sc:
                     score = f"{sc.get('faction1', '?')}:{sc.get('faction2', '?')}"
 
-            # если нет K/D из stats (чистый history) — subtitle = score
             has_kda = str(kills) not in ("0", "") or str(deaths) not in ("0", "")
             if not has_kda and not _sget(stats, "Kills", "kills"):
-                # history item without per-player stats
                 if won is None and results.get("winner"):
-                    # cannot know player side reliably
                     pass
                 subtitle = score or "—"
                 title = map_name if map_name and not str(map_name).startswith("Europe") else (
                     item.get("competition_name") or map_name or "Match"
                 )
-                # try map from voting if present (rare in history list)
                 played_at = None
                 date_raw = (
                     item.get("finished_at")
@@ -1217,7 +1207,7 @@ class GuestProfileView(APIView):
             elif m.get("won") is False:
                 form.append("L")
 
-        # avg recent
+
         n = sum_k = sum_d = sum_a = 0
         for m in match_history[:20]:
             parts = (m.get("subtitle") or "").split("·")[0].strip().split("/")
@@ -1413,7 +1403,6 @@ class GuestProfileView(APIView):
         display_name = profile.get("personaname") or f"Player {account_id}"
         avatar_url = profile.get("avatarfull") or profile.get("avatar")
 
-        # Steam fallback для ника/авы
         try:
             from .integrations.steam_client import SteamClient
             sid64 = str(int(account_id) + 76561197960265728)
@@ -1811,9 +1800,7 @@ class MatchParticipantsView(APIView):
         if winning_team is None:
             winning_team = match_info.get("match_outcome")
 
-        # --- имена героев (ключи только str) ---
         hero_names = cache.get("deadlock:hero_names") or {}
-        # нормализуем старый кэш с int-ключами
         if hero_names and any(not isinstance(k, str) for k in hero_names.keys()):
             hero_names = {str(k): v for k, v in hero_names.items()}
             cache.set("deadlock:hero_names", hero_names, 3600)
@@ -1902,7 +1889,6 @@ class MatchParticipantsView(APIView):
                 "gamehub_user_id": gh.user_id if gh else None,
             })
 
-        # --- Steam ники + аватарки ---
         steam_ids = []
         for p in participants:
             aid = p.get("account_id")
@@ -1968,7 +1954,7 @@ class MatchParticipantsView(APIView):
         results = detail.get("results") or {}
         score = results.get("score") or {}
 
-        # per-player stats from /matches/{id}/stats
+
         per_player = {}
         try:
             stats_payload = client.get_match_stats(match_id)
@@ -2087,7 +2073,6 @@ class MatchParticipantsView(APIView):
 
         rounds_data = []
         for i, rnd in enumerate(detail.get("rounds", []) or []):
-            # --- плант ---
             plant = rnd.get("plant_events") or {}
             if isinstance(plant, list):
                 plant = plant[0] if plant else {}
@@ -2096,12 +2081,10 @@ class MatchParticipantsView(APIView):
             planter_info = plant.get("planted_by") or {}
             planter_puuid = planter_info.get("puuid") if isinstance(planter_info, dict) else None
 
-            # кто атакует в этом раунде
             attacking_team = None
             if planter_puuid and planter_puuid in puuid_to_team:
                 attacking_team = puuid_to_team[planter_puuid]
             if not attacking_team:
-                # до смены сторон (раунды 0–11) обычно Red атакует
                 attacking_team = "Red" if i < 12 else "Blue"
             defending_team = "Blue" if attacking_team == "Red" else "Red"
 
@@ -2129,7 +2112,6 @@ class MatchParticipantsView(APIView):
 
             kills.sort(key=lambda k: k.get("time_in_round") or 0)
 
-            # таймлайн: киллы + плант
             events = [{**k, "type": "kill"} for k in kills]
             if plant_time is not None:
                 events.append({

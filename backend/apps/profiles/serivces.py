@@ -174,13 +174,11 @@ class ProfileSyncService:
             self.linked_accounts.append(acc)
             return acc
 
-        # Dota 2 → OpenDota
         if 570 in appids:
             acc = _link("opendota", account_id, game_label="Dota 2")
             if acc:
                 self._spawn_background_sync(acc)
 
-        # Deadlock
         if DEADLOCK_APPID in appids:
             hours = round((appids[DEADLOCK_APPID].get("playtime_forever") or 0) / 60, 1)
             acc = _link(
@@ -192,7 +190,6 @@ class ProfileSyncService:
             if acc:
                 self._spawn_background_sync(acc)
 
-        # Faceit по SteamID64
         neg_key = f"faceit_neg_by_steam:{steam_id}"
         if not cache.get(neg_key):
             try:
@@ -271,7 +268,6 @@ class ProfileSyncService:
             if not isinstance(matches_raw, list):
                 matches_raw = []
 
-            # опционально — 403 не должен валить синк
             hero_stats_raw = []
             try:
                 if hasattr(client, "get_hero_stats"):
@@ -290,7 +286,6 @@ class ProfileSyncService:
         matches_raw = cached.get("matches") or []
         hero_stats_raw = cached.get("hero_stats") or []
 
-        # --- rank ---
         badge = rank_raw.get("badge") or rank_raw.get("rank") or 0
         subrank = rank_raw.get("subrank") or 0
         try:
@@ -313,7 +308,6 @@ class ProfileSyncService:
         if not tier:
             tier = "Unranked"
 
-        # --- hero names ---
         hero_names = cache.get("deadlock:hero_names") or {}
         if hero_names and any(not isinstance(k, str) for k in hero_names.keys()):
             hero_names = {str(k): v for k, v in hero_names.items()}
@@ -349,7 +343,7 @@ class ProfileSyncService:
         def _won(m: dict):
             outcome = m.get("player_match_outcome")
             if outcome is not None:
-                # часто 1 = win, 0 = loss; либо строка
+
                 if outcome in (1, True, "win", "Won", "WIN"):
                     return True
                 if outcome in (0, 2, False, "loss", "Loss", "LOSE", "lost"):
@@ -465,7 +459,7 @@ class ProfileSyncService:
 
         top_heroes = [{"name": n, "games": c} for n, c in hero_counter.most_common(8)]
 
-        # hero_stats API — если вдруг отдал
+
         if not top_heroes and hero_stats_raw:
             for h in hero_stats_raw[:8]:
                 if not isinstance(h, dict):
@@ -734,7 +728,7 @@ class ProfileSyncService:
         wins = sum(1 for m in match_history if m["won"])
         winrate = round(wins / len(match_history) * 100, 1) if match_history else 0
 
-        # avg за последние игры — сами
+
         nk = nd = na = acs_sum = n_m = 0
         for m in match_history[:20]:
             parts = (m.get("subtitle") or "").split("/")
@@ -856,7 +850,6 @@ class ProfileSyncService:
         o = lifetime.get("overall") or {}
 
         self.account.extra_stats = {
-            # совместимость со старой карточкой
             "matches": o.get("matches", 0),
             "wins": o.get("wins", 0),
             "losses": max((o.get("matches") or 0) - (o.get("wins") or 0), 0),
@@ -867,13 +860,11 @@ class ProfileSyncService:
             "bp_level": lifetime.get("bp_level"),
             "bp_progress": lifetime.get("bp_progress"),
             "modes": lifetime.get("modes") or {},
-            # окна для UI
             "windows": {
                 "lifetime": lifetime,
                 "season": season,
             },
             "default_window": "season" if season and (season.get("overall") or {}).get("matches") else "lifetime",
-            # PR/earnings — fortnite-api.com не отдаёт
             "pr": None,
             "earnings": None,
             "match_history": [],
@@ -898,7 +889,6 @@ class ProfileSyncService:
         except PubgError as e:
             raise SyncError(str(e))
 
-        # playtime_2weeks из owned games
         minutes_2w = 0
         try:
             url = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
@@ -1494,7 +1484,6 @@ class ProfileSyncService:
             elif m["won"] is False:
                 form.append("L")
 
-        # avg за последние матчи — считаем сами
         n = 0
         sum_k = sum_d = sum_a = 0
         sum_hs = 0
@@ -1627,7 +1616,6 @@ def get_steam_library(game_account):
             "appid": appid,
             "name": s.game_name or str(appid),
             "hours_total": round((s.playtime_forever or 0) / 60.0, 1),
-            # None только у старых снапшотов до миграции, после первого синка будет число
             "hours_2weeks": None if s.playtime_2weeks is None else round(s.playtime_2weeks / 60.0, 1),
         }
         for appid, s in by_app.items()

@@ -1,8 +1,8 @@
 from django.test import TestCase
 
 from apps.profiles.serivces import build_display_stats
-# если файл services.py:
-# from apps.profiles.services import build_display_stats
+
+
 
 
 class BuildDisplayStatsFaceitTests(TestCase):

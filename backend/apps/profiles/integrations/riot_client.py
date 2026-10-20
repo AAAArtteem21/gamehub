@@ -6,7 +6,6 @@ class RiotError(Exception):
     pass
 
 
-# platform → account/match routing region
 PLATFORM_TO_REGION = {
     "euw1": "europe", "eun1": "europe", "tr1": "europe", "ru": "europe",
     "na1": "americas", "br1": "americas", "la1": "americas", "la2": "americas",
@@ -47,7 +46,6 @@ class RiotClient:
         except requests.RequestException as e:
             raise RiotError(f"Riot API: {e}") from e
 
-    # --- Account (Riot ID → puuid) ---
     def get_account_by_riot_id(self, game_name: str, tag_line: str):
         gn = quote(game_name, safe="")
         tg = quote(tag_line, safe="")

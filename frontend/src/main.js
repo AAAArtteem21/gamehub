@@ -8,8 +8,8 @@ useTheme().initTheme()
 
 const app = createApp(App)
 
-app.use(createPinia())   // 1. Pinia — первой
-app.use(router)          // 2. Router — второй (использует Pinia внутри guard)
+app.use(createPinia())
+app.use(router)
 
 app.mount('#app')
 

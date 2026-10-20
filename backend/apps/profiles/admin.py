@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import GameAccount, DailySnapshot
 
-# FavoritePlayer / ClanActivity если в profiles — раскомментируй
+
 try:
     from .models import FavoritePlayer
 except ImportError:
