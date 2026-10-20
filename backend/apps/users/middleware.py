@@ -14,7 +14,13 @@ class SecurityHeadersMiddleware:
 
         path = (request.path or "").lower()
 
-        if path.startswith("/auth/") or "login/steam" in path:
+
+        if (
+            path.startswith("/auth/")
+            or "login/steam" in path
+            or path.rstrip("/").endswith("/steam")
+            or "/steam/" in path
+        ):
             return response
 
         response["Content-Security-Policy"] = (
