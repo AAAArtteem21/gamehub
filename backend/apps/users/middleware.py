@@ -1,6 +1,4 @@
 class SecurityHeadersMiddleware:
-    """CSP, cache-control for API, extra security headers."""
-
     def __init__(self, get_response):
         self.get_response = get_response
 
@@ -14,22 +12,35 @@ class SecurityHeadersMiddleware:
         )
         response.headers.setdefault("X-Frame-Options", "DENY")
 
-        csp = (
+        path = request.path or ""
+
+        if path.startswith("/auth/"):
+            response["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "form-action 'self' https://steamcommunity.com; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "object-src 'none';"
+            )
+            return response
+
+        response["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https: blob:; "
             "font-src 'self' data:; "
-            "connect-src 'self' https://gamehub-gh6j.onrender.com "
+            "connect-src 'self' https://gameeyes.onrender.com "
             "https://api.steampowered.com https://steamcommunity.com; "
+            "form-action 'self'; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
-            "form-action 'self'; "
             "object-src 'none';"
         )
-        response["Content-Security-Policy"] = csp
 
-        path = request.path or ""
         if path.startswith("/api/"):
             response["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
             response["Pragma"] = "no-cache"
