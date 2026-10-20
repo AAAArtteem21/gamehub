@@ -33,15 +33,16 @@ def get_csrf_token(request):
 def steam_start(request):
     token = get_token(request)
     html = f"""<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"/><title>Steam</title></head>
+<html lang="ru">
+<head><meta charset="utf-8"/><title>Steam</title></head>
 <body>
-<form method="post" action="/auth/login/steam/">
+<form id="f" method="post" action="/auth/login/steam/">
   <input type="hidden" name="csrfmiddlewaretoken" value="{token}">
-  <button type="submit">Продолжить вход через Steam</button>
 </form>
-</body></html>"""
+<script>document.getElementById('f').submit()</script>
+</body>
+</html>"""
     return HttpResponse(html)
-
 class MeView(generics.RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
     permission_classes = [permissions.IsAuthenticated]

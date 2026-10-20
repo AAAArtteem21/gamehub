@@ -12,9 +12,15 @@ class SecurityHeadersMiddleware:
         )
         response.headers.setdefault("X-Frame-Options", "DENY")
 
-        path = request.path or ""
+        path = (request.path or "").lower()
 
-        if path.startswith("/auth/"):
+        is_steam = (
+            path.startswith("/auth/")
+            or "steam" in path
+            or path.endswith("/login/steam/")
+        )
+
+        if is_steam:
             response["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
