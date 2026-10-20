@@ -14,23 +14,7 @@ class SecurityHeadersMiddleware:
 
         path = (request.path or "").lower()
 
-        is_auth = (
-            path.startswith("/auth/")
-            or "login/steam" in path
-            or path.rstrip("/").endswith("/steam")
-        )
-
-        if is_auth:
-            response["Content-Security-Policy"] = (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: https:; "
-                "form-action 'self' https://steamcommunity.com; "
-                "frame-ancestors 'none'; "
-                "base-uri 'self'; "
-                "object-src 'none';"
-            )
+        if path.startswith("/auth/") or "login/steam" in path:
             return response
 
         response["Content-Security-Policy"] = (
@@ -41,7 +25,7 @@ class SecurityHeadersMiddleware:
             "font-src 'self' data:; "
             "connect-src 'self' https://gameeyes.onrender.com "
             "https://api.steampowered.com https://steamcommunity.com; "
-            "form-action 'self'; "
+            "form-action 'self' https://steamcommunity.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "object-src 'none';"
