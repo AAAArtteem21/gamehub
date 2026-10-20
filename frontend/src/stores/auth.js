@@ -3,39 +3,58 @@ import { ref, computed } from 'vue'
 import api from '../api/axios'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const TOKEN_KEY = 'gh_token'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('gamehub_token') || null)
+  const token = ref(sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem('gamehub_token') || null)
   const user = ref(null)
   const loginPromptOpen = ref(false)
   const loginPromptReason = ref('')
 
-  const isAuthenticated = computed(() => !!token.value)
+  const isAuthenticated = computed(() => !!token.value || !!user.value)
 
   function setToken(newToken) {
-    token.value = newToken
-    localStorage.setItem('gamehub_token', newToken)
-    api.defaults.headers.common['Authorization'] = `Token ${newToken}`
+    token.value = newToken || null
+    if (newToken) {
+      sessionStorage.setItem(TOKEN_KEY, newToken)
+      api.defaults.headers.common['Authorization'] = `Token ${newToken}`
+    } else {
+      sessionStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem('gamehub_token')
+      delete api.defaults.headers.common['Authorization']
+    }
   }
 
-  function logout() {
+  function clearLocal() {
     token.value = null
     user.value = null
+    sessionStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem('gamehub_token')
     delete api.defaults.headers.common['Authorization']
+  }
+
+  async function logout() {
+    try {
+      await api.post('auth/logout/')
+    } catch (_) {
+    }
+    clearLocal()
   }
 
   async function fetchMe() {
     try {
       const res = await api.get('me/')
       user.value = res.data
+      if (!token.value && res.data) {
+        token.value = 'cookie'
+      }
+      return res.data
     } catch (e) {
-      // выходим только если токен реально невалидный, а не при сбое сети/сервера
-      if (e.response?.status === 401) logout()
+      if (e.response?.status === 401) clearLocal()
+      throw e
     }
   }
 
-  // вернёт true, если можно продолжать; иначе покажет окно "войди через Steam"
   function requireAuth(reason = '') {
     if (isAuthenticated.value) return true
     loginPromptReason.value = reason
@@ -48,12 +67,24 @@ export const useAuthStore = defineStore('auth', () => {
     window.location.href = `${API_BASE}/api/auth/steam/start/`
   }
 
-  if (token.value) {
+
+  if (token.value && token.value !== 'cookie') {
+    sessionStorage.setItem(TOKEN_KEY, token.value)
+    localStorage.removeItem('gamehub_token')
     api.defaults.headers.common['Authorization'] = `Token ${token.value}`
   }
 
   return {
-    token, user, isAuthenticated, loginPromptOpen, loginPromptReason,
-    setToken, logout, fetchMe, requireAuth, loginWithSteam,
+    token,
+    user,
+    isAuthenticated,
+    loginPromptOpen,
+    loginPromptReason,
+    setToken,
+    clearLocal,
+    logout,
+    fetchMe,
+    requireAuth,
+    loginWithSteam,
   }
 })
