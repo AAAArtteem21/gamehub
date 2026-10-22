@@ -6,6 +6,7 @@ class CreateDotaAnalystSerializer(serializers.Serializer):
 
 
 class MatchAnalysisSerializer(serializers.ModelSerializer):
+    input_snapshots = serializers.JSONField(source="input_snapshot", read_only=True)
     class Meta:
         model = MatchAnalysis
         fields = [
