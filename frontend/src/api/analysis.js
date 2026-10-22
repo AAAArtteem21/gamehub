@@ -1,7 +1,6 @@
 import api from './axios'
 
 export const analysisApi = {
-
     createDota: (matchId) =>
         api.post('analysis/dota/', { match_id: String(matchId) }),
 

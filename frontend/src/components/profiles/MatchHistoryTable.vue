@@ -48,22 +48,21 @@ function showMore() {
 
 async function analyzeMatch(m) {
   if (!m?.match_id) return
-  if (!auth.requireAuth('Войди через Steam, чтобы разобрать матч')) return
+  if (!auth.requireAuth?.('Войди, чтобы разобрать матч') && !auth.isAuthenticated) return
 
   loadingId.value = m.match_id
   analyzeError.value = null
   try {
     const res = await analysisApi.createDota(m.match_id)
-    if (res.data.status === 'failed') {
-      analyzeError.value = res.data.error_message || 'Не удалось разобрать матч'
+    const data = res.data
+    if (data.status === 'failed') {
+      analyzeError.value = data.error_message || data.detail || 'Не удалось разобрать'
       return
     }
-    analysis.value = res.data
+    analysis.value = data
   } catch (e) {
-    analyzeError.value =
-      e.response?.data?.detail ||
-      e.response?.data?.error_message ||
-      'Ошибка анализа'
+    const d = e.response?.data
+    analyzeError.value = d?.detail || d?.error_message || e.message || 'Ошибка анализа'
   } finally {
     loadingId.value = null
   }
@@ -182,11 +181,14 @@ async function analyzeMatch(m) {
 }
 
 .analyze-err {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
   font-size: 12px;
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-sm);
 }
-
 .match-row {
   background: var(--bg-sunken);
   border: 1px solid var(--border-color);

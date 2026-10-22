@@ -6,7 +6,7 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('gh_token')
+  const token = localStorage.getItem('gh_token')  // не sessionStorage
   if (token) {
     config.headers.Authorization = `Token ${token}`
   }
@@ -21,7 +21,7 @@ api.interceptors.response.use(
       const auth = useAuthStore()
       if (auth.isAuthenticated) auth.logout()
       if (err.config?.method && err.config.method !== 'get') {
-        auth.requireAuth('Войди через Steam, чтобы это сделать.')
+        auth.requireAuth?.('Войди через Steam, чтобы это сделать.')
       }
     }
     return Promise.reject(err)

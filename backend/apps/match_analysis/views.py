@@ -53,6 +53,7 @@ class CreateDotaAnalysisView(APIView):
                 )
 
             analysis, created = MatchAnalysis.objects.get_or_create(
+                
                 user=request.user,
                 platform=MatchAnalysis.Platform.OPENDOTA,
                 external_match_id=match_id,
@@ -60,7 +61,11 @@ class CreateDotaAnalysisView(APIView):
             )
 
             if not created and analysis.status == MatchAnalysis.Status.READY:
-                return Response(MatchAnalysisSerializer(analysis).data)
+                if not (analysis.input_snapshot or {}).get("match"):
+                    analysis.status = MatchAnalysis.Status.PENDING
+                    analysis = run_dota_analysis(analysis, steam32)
+                else:
+                    return Response(MatchAnalysisSerializer(analysis).data)
 
             analysis = run_dota_analysis(analysis, steam32)
 
