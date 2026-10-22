@@ -61,7 +61,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function updateProfile(data) {
-        const response = await api.patch('/profiles/me/', data)
+        const response = await api.patch('me/', data)
         user.value = response.data
         return response.data
     }
