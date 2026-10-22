@@ -37,36 +37,46 @@ def resolve_steam32(user) -> int | None:
     return None
 
 class CreateDotaAnalysisView(APIView):
-    permissions_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        ser = CreateDotaAnalystSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        match_id = str(ser.validated_data["match_id"]).strip()
+        try:
+            ser = CreateDotaAnalystSerializer(data=request.data)
+            ser.is_valid(raise_exception=True)
+            match_id = str(ser.validated_data["match_id"]).strip()
 
-        steam32 = resolve_steam32(request.user)
-        if not steam32:
-            return Response(
-                {"detail": "Не привязан Steam / steam32"},
-                status=status.HTTP_400_BAD_REQUEST,
+            steam32 = resolve_steam32(request.user)
+            if not steam32:
+                return Response(
+                    {"detail": "Не привязан Steam / steam32"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            analysis, created = MatchAnalysis.objects.get_or_create(
+                user=request.user,
+                platform=MatchAnalysis.Platform.OPENDOTA,
+                external_match_id=match_id,
+                defaults={"game": "dota2", "status": MatchAnalysis.Status.PENDING},
             )
 
-        analysis, created = MatchAnalysis.objects.get_or_create(
-            user=request.user,
-            platform=MatchAnalysis.Platform.OPENDOTA,
-            external_match_id=match_id,
-            defaults={"game": "dota2", "status": MatchAnalysis.Status.PENDING},
-        )
+            if not created and analysis.status == MatchAnalysis.Status.READY:
+                return Response(MatchAnalysisSerializer(analysis).data)
 
-        if not created and analysis.status == MatchAnalysis.Status.READY:
+            analysis = run_dota_analysis(analysis, steam32)
+
+            if analysis.status == MatchAnalysis.Status.FAILED:
+                return Response(
+                    MatchAnalysisSerializer(analysis).data,
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(MatchAnalysisSerializer(analysis).data)
-
-        analysis = run_dota_analysis(analysis, steam32)
-        code = status.HTTP_200_OK if analysis.status == MatchAnalysis.Status.READY else status.HTTP_201_CREATED
-        if analysis.status == MatchAnalysis.Status.FAILED:
-            code = status.HTTP_400_BAD_REQUEST
-        return Response(MatchAnalysisSerializer(analysis).data, status=code)
-
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"detail": str(e), "type": type(e).__name__},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 class MatchAnalysisDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
