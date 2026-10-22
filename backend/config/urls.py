@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/", include("apps.lfg.urls")),
     path("api/", include("apps.profiles.urls")),
     path("api/", include("apps.clans.urls")),
+    path("api/", include("apps.match_analysis.urls")),
     path("health/", health),
 ]
 

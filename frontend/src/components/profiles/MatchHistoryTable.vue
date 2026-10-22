@@ -1,15 +1,25 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { analysisApi } from '../../api/analysis'
+import MatchAnalysisPanel from '../analysis/MatchAnalysisPanel.vue'
+import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps({
   matches: { type: Array, default: () => [] },
   initialLimit: { type: Number, default: 8 },
   canOpenParticipants: { type: Boolean, default: true },
+  /** показывать кнопку AI-разбора (только свой профиль доты) */
+  enableAnalysis: { type: Boolean, default: false },
 })
 const emit = defineEmits(['open-match'])
 
+const auth = useAuthStore()
 const expandedIndex = ref(null)
 const limit = ref(props.initialLimit)
+
+const analysis = ref(null)
+const loadingId = ref(null)
+const analyzeError = ref(null)
 
 const visibleMatches = computed(() => (props.matches || []).slice(0, limit.value))
 const canShowMore = computed(() => (props.matches || []).length > limit.value)
@@ -19,6 +29,7 @@ watch(
   () => {
     expandedIndex.value = null
     limit.value = props.initialLimit
+    analyzeError.value = null
   }
 )
 
@@ -34,11 +45,37 @@ function openParticipants(m) {
 function showMore() {
   limit.value = Math.min(limit.value + 10, (props.matches || []).length)
 }
+
+async function analyzeMatch(m) {
+  if (!m?.match_id) return
+  if (!auth.requireAuth('Войди через Steam, чтобы разобрать матч')) return
+
+  loadingId.value = m.match_id
+  analyzeError.value = null
+  try {
+    const res = await analysisApi.createDota(m.match_id)
+    if (res.data.status === 'failed') {
+      analyzeError.value = res.data.error_message || 'Не удалось разобрать матч'
+      return
+    }
+    analysis.value = res.data
+  } catch (e) {
+    analyzeError.value =
+      e.response?.data?.detail ||
+      e.response?.data?.error_message ||
+      'Ошибка анализа'
+  } finally {
+    loadingId.value = null
+  }
+}
 </script>
 
 <template>
   <div class="match-history" v-if="matches?.length">
     <h4>История матчей</h4>
+
+    <p v-if="analyzeError" class="analyze-err">{{ analyzeError }}</p>
+
     <div
       v-for="(m, i) in visibleMatches"
       :key="m.match_id || i"
@@ -83,14 +120,27 @@ function showMore() {
             <span class="detail-label">{{ d.label }}</span>
             <span class="detail-value">{{ d.value }}</span>
           </div>
-          <button
-            type="button"
-            class="view-participants-btn"
-            v-if="m.match_id && canOpenParticipants"
-            @click.stop="openParticipants(m)"
-          >
-            Кто играл
-          </button>
+
+          <div class="match-actions" v-if="m.match_id">
+            <button
+              type="button"
+              class="view-participants-btn"
+              v-if="canOpenParticipants"
+              @click.stop="openParticipants(m)"
+            >
+              Кто играл
+            </button>
+
+            <button
+              v-if="enableAnalysis"
+              type="button"
+              class="btn-analyze"
+              :disabled="loadingId === m.match_id"
+              @click.stop="analyzeMatch(m)"
+            >
+              {{ loadingId === m.match_id ? 'Анализ…' : 'Разбор AI' }}
+            </button>
+          </div>
         </div>
       </transition>
     </div>
@@ -106,6 +156,12 @@ function showMore() {
         ({{ visibleMatches.length }} / {{ matches.length }})
       </span>
     </button>
+
+    <MatchAnalysisPanel
+      v-if="analysis"
+      :analysis="analysis"
+      @close="analysis = null"
+    />
   </div>
 </template>
 
@@ -123,6 +179,12 @@ function showMore() {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.analyze-err {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--danger);
 }
 
 .match-row {
@@ -238,9 +300,17 @@ function showMore() {
   font-variant-numeric: tabular-nums;
 }
 
-.view-participants-btn {
+.match-actions {
   grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 2px;
+}
+
+.view-participants-btn {
+  flex: 1;
+  min-width: 120px;
   background: var(--accent-dim);
   border: 1px solid rgba(196, 165, 116, 0.25);
   color: var(--accent);
@@ -254,6 +324,27 @@ function showMore() {
   background: var(--accent);
   color: #12100c;
   border-color: var(--accent);
+}
+
+.btn-analyze {
+  flex: 1;
+  min-width: 120px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-analyze:hover:not(:disabled) {
+  background: var(--accent);
+  color: #12100c;
+}
+.btn-analyze:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .expand-enter-active,

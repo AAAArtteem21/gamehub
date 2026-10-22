@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.lfg",
     "apps.clans",
     "apps.friends",
+    "apps.match_analysis",
 ]
 
 MIDDLEWARE = [
