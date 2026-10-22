@@ -6,7 +6,7 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('gh_token')  // не sessionStorage
+  const token = localStorage.getItem('gh_token')
   if (token) {
     config.headers.Authorization = `Token ${token}`
   }
@@ -17,11 +17,21 @@ api.interceptors.response.use(
   (r) => r,
   async (err) => {
     if (err.response?.status === 401) {
-      const { useAuthStore } = await import('../stores/auth')
-      const auth = useAuthStore()
-      if (auth.isAuthenticated) auth.logout()
-      if (err.config?.method && err.config.method !== 'get') {
-        auth.requireAuth?.('Войди через Steam, чтобы это сделать.')
+      const url = err.config?.url || ''
+      // только явный me/logout — не сносить токен на любой 401
+      const isAuthCheck =
+        url.includes('me/') ||
+        url.includes('auth/logout')
+
+      if (isAuthCheck) {
+        localStorage.removeItem('gh_token')
+        delete api.defaults.headers.common['Authorization']
+        try {
+          const { useAuthStore } = await import('../stores/auth')
+          const auth = useAuthStore()
+          auth.user = null
+          auth.token = null
+        } catch (_) { }
       }
     }
     return Promise.reject(err)

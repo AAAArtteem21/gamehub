@@ -8,20 +8,21 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 onMounted(async () => {
-  // Разовый token в URL — запасной путь (разные домены / Chrome режет third-party cookie)
   const token = route.query.token
   if (token) {
-    authStore.setToken(token)
+    authStore.setToken(String(token))
   }
 
+  const back = sessionStorage.getItem('post_login_redirect') || '/'
+  sessionStorage.removeItem('post_login_redirect')
+
   try {
-    await authStore.fetchMe()
-    const back = sessionStorage.getItem('post_login_redirect') || '/'
-    sessionStorage.removeItem('post_login_redirect')
-    // убираем token из адресной строки
+    await authStore.fetchUser()
     router.replace(back)
   } catch {
-    router.replace('/login')
+    // токен есть — не на login, а на главную
+    if (authStore.token) router.replace(back)
+    else router.replace('/login')
   }
 })
 </script>
