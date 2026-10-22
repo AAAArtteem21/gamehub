@@ -48,31 +48,21 @@ function showMore() {
 
 async function analyzeMatch(m) {
   if (!m?.match_id) return
-  if (!auth.requireAuth('Войди через Steam, чтобы разобрать матч')) return
+  if (!auth.requireAuth?.('Войди, чтобы разобрать матч') && !auth.isAuthenticated) return
 
   loadingId.value = m.match_id
   analyzeError.value = null
   try {
     const res = await analysisApi.createDota(m.match_id)
     const data = res.data
-
-    if (data.status === 'failed' || data.error_message) {
-      analyzeError.value =
-        data.error_message || data.detail || 'Не удалось разобрать матч'
+    if (data.status === 'failed') {
+      analyzeError.value = data.error_message || data.detail || 'Не удалось разобрать'
       return
-    }
-    if (!data.input_snapshot?.match && data.status === 'ready') {
-      analyzeError.value = 'Анализ без данных матча — попробуй другой match_id'
     }
     analysis.value = data
   } catch (e) {
     const d = e.response?.data
-    analyzeError.value =
-      d?.detail ||
-      d?.error_message ||
-      d?.type ||
-      e.message ||
-      'Ошибка анализа'
+    analyzeError.value = d?.detail || d?.error_message || e.message || 'Ошибка анализа'
   } finally {
     loadingId.value = null
   }
