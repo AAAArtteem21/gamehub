@@ -8,25 +8,29 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+
+
 OPENDOTA = getattr(settings, "OPENDOTA_API_URL", "https://api.opendota.com/api").rstrip("/")
 TIMEOUT = 20
 
-def _get(path: str, params: dict | None = None) -> Any:
+
+def _get(path: str, params: dict | None = None):
+    path = "/" + str(path).lstrip("/")
     url = f"{OPENDOTA}{path}"
     r = requests.get(url, params=params or {}, timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()
 
-def fetch_player_recent(steam32: int, limit: int = 20) -> list[dict]:
-    """GET /players/{account_id}/recentMatches"""
+
+def fetch_player_recent(steam32: int, limit: int = 20) -> list:
     data = _get(f"/players/{steam32}/recentMatches")
     if not isinstance(data, list):
         return []
     return data[:limit]
 
+
 def fetch_match(match_id: int | str) -> dict:
-    """ GET /matches/{match_id}"""
-    return _get(f"matches/{match_id}")
+    return _get(f"/matches/{int(match_id)}")
 
 def find_player_slot(match: dict, steam32: int) -> dict | None:
     for p in match.get("players") or []:
