@@ -44,12 +44,19 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
+
+  if (authStore.token && !authStore.user) {
+    try {
+      await authStore.fetchMe()
+    } catch (_) {
+    }
+  }
+
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     authStore.requireAuth('Войди через Steam, чтобы открыть эту страницу.')
-    return to.name ? { name: 'home' } : '/'
+    return { name: 'home' }
   }
 })
-
 export default router
