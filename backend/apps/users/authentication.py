@@ -3,17 +3,16 @@ from rest_framework.authentication import TokenAuthentication
 
 class CookieTokenAuthentication(TokenAuthentication):
     """
-    Сначала Authorization: Token … (для отладки/скриптов),
-    иначе cookie gh_auth_token (HttpOnly).
+    1) Authorization: Token <key>
+    2) cookie gh_auth_token
     """
-    keyword = "Token"
 
     def authenticate(self, request):
-        result = super().authenticate(request)
-        if result is not None:
-            return result
+        header_auth = super().authenticate(request)
+        if header_auth is not None:
+            return header_auth
 
         raw = request.COOKIES.get("gh_auth_token")
         if not raw:
             return None
-        return self.authenticate_credentials(raw.strip())
+        return self.authenticate_credentials(raw)

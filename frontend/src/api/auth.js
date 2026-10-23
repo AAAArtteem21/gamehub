@@ -43,7 +43,7 @@ export const useAuthStore = defineStore('auth', () => {
             user.value = response.data
             return response.data
         } catch (err) {
-            console.error('Ошибка загрузки профиля:', err)
+            console.error('fetchUser', err?.response?.status, err?.response?.data)
             if (err.response?.status === 401) {
                 setToken(null)
                 user.value = null
@@ -55,7 +55,6 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    // алиас, если где-то вызывается fetchMe
     async function fetchMe() {
         return fetchUser()
     }
