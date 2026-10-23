@@ -6,7 +6,11 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const TOKEN_KEY = 'gh_token'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem('gamehub_token') || null)
+  const token = ref(
+    localStorage.getItem(TOKEN_KEY) ||
+    localStorage.getItem('gamehub_token') ||
+    null
+  )
   const user = ref(null)
   const loginPromptOpen = ref(false)
   const loginPromptReason = ref('')
@@ -15,11 +19,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setToken(newToken) {
     token.value = newToken || null
+
     if (newToken) {
-      sessionStorage.setItem(TOKEN_KEY, newToken)
+      localStorage.setItem(TOKEN_KEY, newToken)
+      localStorage.removeItem('gamehub_token')
       api.defaults.headers.common['Authorization'] = `Token ${newToken}`
     } else {
-      sessionStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem('gamehub_token')
       delete api.defaults.headers.common['Authorization']
     }
@@ -28,8 +34,10 @@ export const useAuthStore = defineStore('auth', () => {
   function clearLocal() {
     token.value = null
     user.value = null
-    sessionStorage.removeItem(TOKEN_KEY)
+
+    localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem('gamehub_token')
+
     delete api.defaults.headers.common['Authorization']
   }
 
@@ -69,7 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
 
 
   if (token.value && token.value !== 'cookie') {
-    sessionStorage.setItem(TOKEN_KEY, token.value)
+    localStorage.setItem(TOKEN_KEY, token.value)
     localStorage.removeItem('gamehub_token')
     api.defaults.headers.common['Authorization'] = `Token ${token.value}`
   }
