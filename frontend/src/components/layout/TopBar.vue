@@ -6,7 +6,7 @@ import IconSearch from '../icons/IconSearch.vue'
 import api from '../../api/axios'
 import { useTheme } from '../../composables/useTheme'
 import logo from '../../assets/images/logo.png'
-
+import FriendsButton from '../components/friends/FriendsButton.vue'
 const authStore = useAuthStore()
 const router = useRouter()
 const toggleSidebar = inject('toggleSidebar', () => {})
@@ -273,6 +273,9 @@ onUnmounted(() => {
       </div>
 
       <template v-if="authStore.isAuthenticated">
+        <!-- Друзья -->
+        <FriendsButton />
+
         <!-- Уведомления -->
         <div class="notif-wrap" ref="notifRef">
           <button
