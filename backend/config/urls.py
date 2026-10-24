@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/", include("apps.profiles.urls")),
     path("api/", include("apps.clans.urls")),
     path("api/", include("apps.match_analysis.urls")),
+    path("api/", include("apps.friends.urls")),
     path("health/", health),
 ]
 

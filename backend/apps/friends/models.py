@@ -1,26 +1,40 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
+
+
+class PlayStatus:
+    OFFLINE = "offline"
+    FREE = "free"
+    RANKED = "ranked"
+    LFG = "lfg"
+
+    CHOICES = [
+        (OFFLINE, "Не в сети"),
+        (FREE, "Свободен"),
+        (RANKED, "Играю рейтинг"),
+        (LFG, "Ищу команду"),
+    ]
 
 
 class UserPresence(models.Model):
-    STATUS_CHOICES = [
-        ("offline", "Offline"),
-        ("free", "Free"),
-        ("ranked", "Ranked"),
-        ("lfg", "LFG"),
-    ]
-
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="presence"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="presence",
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="offline")
-    note = models.CharField(max_length=100, blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=PlayStatus.CHOICES,
+        default=PlayStatus.OFFLINE,
+    )
+    note = models.CharField(max_length=80, blank=True, default="")
     game = models.CharField(max_length=50, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user} — {self.status}"
+        return f"{self.user_id}: {self.status}"
 
 
 class Friendship(models.Model):
@@ -37,36 +51,43 @@ class Friendship(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["user_low", "user_high"], name="unique_friendship_pair"
-            )
+        unique_together = ("user_low", "user_high")
+        indexes = [
+            models.Index(fields=["user_low"]),
+            models.Index(fields=["user_high"]),
         ]
 
-    def save(self, *args, **kwargs):
-        if self.user_low_id and self.user_high_id and self.user_low_id > self.user_high_id:
-            self.user_low_id, self.user_high_id = self.user_high_id, self.user_low_id
-        super().save(*args, **kwargs)
+    @staticmethod
+    def pair(u1_id: int, u2_id: int):
+        return (u1_id, u2_id) if u1_id < u2_id else (u2_id, u1_id)
 
     @classmethod
-    def between(cls, a, b):
-        low, high = (a, b) if a.id < b.id else (b, a)
-        return cls.objects.filter(user_low=low, user_high=high).first()
+    def are_friends(cls, u1_id: int, u2_id: int) -> bool:
+        if u1_id == u2_id:
+            return False
+        a, b = cls.pair(u1_id, u2_id)
+        return cls.objects.filter(user_low_id=a, user_high_id=b).exists()
 
     @classmethod
-    def for_user(cls, user):
-        return cls.objects.filter(Q(user_low=user) | Q(user_high=user))
-
-    def __str__(self):
-        return f"{self.user_low} ↔ {self.user_high}"
+    def friend_ids_of(cls, user_id: int):
+        qs = cls.objects.filter(Q(user_low_id=user_id) | Q(user_high_id=user_id))
+        ids = set()
+        for f in qs.only("user_low_id", "user_high_id"):
+            ids.add(f.user_high_id if f.user_low_id == user_id else f.user_low_id)
+        return ids
 
 
 class FriendRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELLED = "cancelled"
+
     STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("accepted", "Accepted"),
-        ("rejected", "Rejected"),
-        ("cancelled", "Cancelled"),
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_CANCELLED, "Cancelled"),
     ]
 
     from_user = models.ForeignKey(
@@ -79,27 +100,46 @@ class FriendRequest(models.Model):
         on_delete=models.CASCADE,
         related_name="friend_requests_received",
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    message = models.CharField(max_length=300, blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    message = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     decided_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        indexes = [
+            models.Index(fields=["to_user", "status"]),
+            models.Index(fields=["from_user", "status"]),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["from_user", "to_user"],
                 condition=Q(status="pending"),
-                name="unique_pending_friend_request",
+                name="uniq_pending_friend_request",
             )
         ]
 
-    def __str__(self):
-        return f"{self.from_user} → {self.to_user} ({self.status})"
+    def accept(self):
+        if self.status != self.STATUS_PENDING:
+            return False
+        a, b = Friendship.pair(self.from_user_id, self.to_user_id)
+        Friendship.objects.get_or_create(user_low_id=a, user_high_id=b)
+        self.status = self.STATUS_ACCEPTED
+        self.decided_at = timezone.now()
+        self.save(update_fields=["status", "decided_at"])
+        FriendRequest.objects.filter(
+            from_user_id=self.to_user_id,
+            to_user_id=self.from_user_id,
+            status=self.STATUS_PENDING,
+        ).update(status=self.STATUS_CANCELLED, decided_at=timezone.now())
+        return True
 
 
 class Acquaintance(models.Model):
-
-    SOURCE_CHOICES = [("lfg", "LFG")]
+    SOURCE_LFG = "lfg"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -109,20 +149,23 @@ class Acquaintance(models.Model):
     other = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="acquaintance_of",
+        related_name="acquainted_by",
     )
-    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default="lfg")
-    lfg_post = models.ForeignKey(
-        "lfg.LFGPost",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="+",
-    )
+    source = models.CharField(max_length=20, default=SOURCE_LFG)
+    lfg_post_id = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ("user", "other")
+        indexes = [models.Index(fields=["user", "-created_at"])]
 
-    def __str__(self):
-        return f"{self.user} ~ {self.other} ({self.source})"
+    @classmethod
+    def link_from_lfg(cls, user_a_id: int, user_b_id: int, post_id=None):
+        if user_a_id == user_b_id:
+            return
+        for u, o in ((user_a_id, user_b_id), (user_b_id, user_a_id)):
+            cls.objects.get_or_create(
+                user_id=u,
+                other_id=o,
+                defaults={"source": cls.SOURCE_LFG, "lfg_post_id": post_id},
+            )
