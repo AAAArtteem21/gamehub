@@ -20,7 +20,7 @@ REPORT_SCHEMA_HINT = """
 Пиши по-русски.
 """
 
-def analyze_dota_snapshots(snapshots: dict) -> tuple[dict, str]:
+def analyze_dota_snapshot(snapshots: dict) -> tuple[dict, str]:
     api_key = getattr(settings, "OPEN_API_KEY", "") or ""
     model = getattr(settings, "OPENAI_MODEL", "gpt-40-mini")
 

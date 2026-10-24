@@ -53,19 +53,43 @@ class CreateDotaAnalysisView(APIView):
                 )
 
             analysis, created = MatchAnalysis.objects.get_or_create(
-                
                 user=request.user,
                 platform=MatchAnalysis.Platform.OPENDOTA,
                 external_match_id=match_id,
                 defaults={"game": "dota2", "status": MatchAnalysis.Status.PENDING},
             )
 
-            if not created and analysis.status == MatchAnalysis.Status.READY:
-                if not (analysis.input_snapshot or {}).get("match"):
-                    analysis.status = MatchAnalysis.Status.PENDING
-                    analysis = run_dota_analysis(analysis, steam32)
-                else:
-                    return Response(MatchAnalysisSerializer(analysis).data)
+            snap = analysis.input_snapshot or {}
+            match = snap.get("match") or {}
+            report = analysis.report_json or {}
+            stats = report.get("match_stats") or {}
+
+            has_stats = analysis.status == MatchAnalysis.Status.READY and (
+                match.get("kills") is not None
+                or stats.get("kills") is not None
+                or match.get("gpm") is not None
+                or stats.get("gpm") is not None
+            )
+
+            if not created and has_stats:
+                return Response(MatchAnalysisSerializer(analysis).data)
+
+            analysis.status = MatchAnalysis.Status.PENDING
+            analysis.input_snapshot = {}
+            analysis.report_json = {}
+            analysis.error_message = ""
+            analysis.model_name = ""
+            analysis.finished_at = None
+            analysis.save(
+                update_fields=[
+                    "status",
+                    "input_snapshot",
+                    "report_json",
+                    "error_message",
+                    "model_name",
+                    "finished_at",
+                ]
+            )
 
             analysis = run_dota_analysis(analysis, steam32)
 
@@ -75,8 +99,10 @@ class CreateDotaAnalysisView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             return Response(MatchAnalysisSerializer(analysis).data)
+
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return Response(
                 {"detail": str(e), "type": type(e).__name__},
