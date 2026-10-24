@@ -6,7 +6,7 @@ import IconSearch from '../icons/IconSearch.vue'
 import api from '../../api/axios'
 import { useTheme } from '../../composables/useTheme'
 import logo from '../../assets/images/logo.png'
-import FriendsButton from '../components/friends/FriendsButton.vue'
+import FriendsButton from '../friends/FriendsButton.vue'
 const authStore = useAuthStore()
 const router = useRouter()
 const toggleSidebar = inject('toggleSidebar', () => {})
