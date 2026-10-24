@@ -65,7 +65,7 @@ def summarize_recent(recent: list[dict]) -> dict:
     }
 
 
-def build_dota_snapshots(ctx: dict) -> dict:
+def build_dota_snapshot(ctx: dict) -> dict:
     m = ctx["match"]
     recent_sum = summarize_recent(ctx.get("recent") or [])
 
