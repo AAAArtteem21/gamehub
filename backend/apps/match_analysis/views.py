@@ -45,6 +45,12 @@ class CreateDotaAnalysisView(APIView):
             ser.is_valid(raise_exception=True)
             match_id = str(ser.validated_data["match_id"]).strip()
 
+            hint = {
+                k: ser.validated_data[k]
+                for k in ("kills", "deaths", "assists", "gpm", "xpm", "last_hits", "won")
+                if k in ser.validated_data and ser.validated_data.get(k) is not None
+            }
+
             steam32 = resolve_steam32(request.user)
             if not steam32:
                 return Response(
@@ -91,7 +97,7 @@ class CreateDotaAnalysisView(APIView):
                 ]
             )
 
-            analysis = run_dota_analysis(analysis, steam32)
+            analysis = run_dota_analysis(analysis, steam32, hint=hint)
 
             if analysis.status == MatchAnalysis.Status.FAILED:
                 return Response(

@@ -6,6 +6,7 @@ from .ai_analyzer import analyze_dota_snapshot
 
 
 def run_dota_analysis(analysis: MatchAnalysis, steam32: int) -> MatchAnalysis:
+    hint = hint or {}
     analysis.status = MatchAnalysis.Status.RUNNING
     analysis.error_message = ""
     analysis.save(update_fields=["status", "error_message"])
@@ -16,6 +17,17 @@ def run_dota_analysis(analysis: MatchAnalysis, steam32: int) -> MatchAnalysis:
         report, model_name = analyze_dota_snapshot(snapshot)
 
         m = snapshot.get("match") or {}
+        if m.get("kills") is None and m.gpm is None:
+            analysis.status = MatchAnalysis.Status.FAILED
+            analysis.error_message = (
+                "Opendota не вернул статистику игрока в этом матче."
+                "Попробуйте позже или другой матч."
+            )
+            analysis.input_snapshot = snapshot
+            analysis.finished_at = timezone.now()
+            analysis.save()
+            return analysis
+
         r20 = snapshot.get("recent_20") or {}
 
         report["match_stats"] = {

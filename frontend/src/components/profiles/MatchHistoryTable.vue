@@ -53,18 +53,60 @@ async function analyzeMatch(m) {
   loadingId.value = m.match_id
   analyzeError.value = null
   try {
-    const res = await analysisApi.createDota(m.match_id)
+    // hint из строки истории (details / поля матча — как у вас заполнено)
+    const hint = extractHint(m)
+
+    const res = await analysisApi.createDota(m.match_id, hint)
     const data = res.data
+
     if (data.status === 'failed') {
-      analyzeError.value = data.error_message || data.detail || 'Не удалось разобрать'
+      analyzeError.value =
+        data.error_message || data.detail || 'Не удалось разобрать'
       return
     }
     analysis.value = data
   } catch (e) {
     const d = e.response?.data
-    analyzeError.value = d?.detail || d?.error_message || e.message || 'Ошибка анализа'
+    analyzeError.value =
+      d?.detail || d?.error_message || e.message || 'Ошибка анализа'
   } finally {
     loadingId.value = null
+  }
+}
+
+function extractHint(m) {
+  const fromDetails = {}
+  for (const d of m.details || []) {
+    const label = String(d.label || '').toLowerCase()
+    const raw = String(d.value ?? '').replace(',', '').trim()
+    const num = Number(raw)
+    if (Number.isNaN(num)) continue
+    if (label.includes('gpm')) fromDetails.gpm = num
+    if (label.includes('xpm')) fromDetails.xpm = num
+    if (label === 'cs' || label.includes('last')) fromDetails.last_hits = num
+  }
+
+  // subtitle часто "12/5/20"
+  let kills = m.kills
+  let deaths = m.deaths
+  let assists = m.assists
+  if (kills == null && m.subtitle) {
+    const parts = String(m.subtitle).split('/').map((x) => Number(x.trim()))
+    if (parts.length >= 3 && parts.every((n) => !Number.isNaN(n))) {
+      kills = parts[0]
+      deaths = parts[1]
+      assists = parts[2]
+    }
+  }
+
+  return {
+    kills: kills ?? fromDetails.kills,
+    deaths: deaths ?? fromDetails.deaths,
+    assists: assists ?? fromDetails.assists,
+    gpm: m.gpm ?? fromDetails.gpm,
+    xpm: m.xpm ?? fromDetails.xpm,
+    last_hits: m.last_hits ?? fromDetails.last_hits,
+    won: m.won,
   }
 }
 </script>
