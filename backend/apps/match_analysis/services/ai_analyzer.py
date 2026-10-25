@@ -58,80 +58,155 @@ def analyze_dota_snapshot(snapshots: dict) -> tuple[dict, str]:
 
 def _heuristic_report(snapshot: dict) -> dict:
     m = snapshot.get("match") or {}
-    d = snapshot.get("detals") or {}
+    d = snapshot.get("deltas") or {}
+    r20 = snapshot.get("recent_20") or {}
     won = m.get("won")
+
+    k = m.get("kills")
+    deaths = m.get("deaths")
+    a = m.get("assists")
+    gpm = m.get("gpm")
+    xpm = m.get("xpm")
+    kd = m.get("kd")
+    kda = m.get("kda")
 
     strengths, weaknesses, recs = [], [], []
 
-    if d.get("kd_vs_avg", 0) >= 0.2:
-        strengths.append({
-            "title": "K/D выше обычного",
-            "detail": "В этом матче соотношение убийств к смертям лучше среднего за последние игры.",
-            "evidence": f"KD {m.get('kd')} vs avg {snapshot.get('recent_20', {}).get('avg_kd')}",
-        })
-    if d.get("kd_vs_avg", 0) <= -0.2:
-        weaknesses.append({
-            "title": "K/D ниже формы",
-            "detail": "Больше смертей или меньше убийств, чем обычно.",
-            "evidence": f"KD {m.get('kd')} vs avg {snapshot.get('recent_20', {}).get('avg_kd')}",
-        })
-        recs.append({
-            "priority": 1,
-            "action": "Играй осторожнее до пика предметов, меньше соло-заходов",
-            "why": "Смерти выше среднего относительно твоей формы",
-        })
+    def add_s(title, detail, evidence):
+        strengths.append({"title": title, "detail": detail, "evidence": evidence})
 
-    if d.get("gpm_vs_avg", 0) >= 40:
-        strengths.append({
-            "title": "Хороший фарм",
-            "detail": "GPM заметно выше среднего.",
-            "evidence": f"GPM {m.get('gpm')} vs avg {snapshot.get('recent_20', {}).get('avg_gpm')}",
-        })
-    elif d.get("gpm_vs_avg", 0) <= -40:
-        weaknesses.append({
-            "title": "Фарм ниже обычного",
-            "detail": "Меньше золота в минуту, чем в последних матчах.",
-            "evidence": f"GPM {m.get('gpm')} vs avg {snapshot.get('recent_20', {}).get('avg_gpm')}",
-        })
-        recs.append({
-            "priority": 2,
-            "action": "Держи стек/кейс/волны стабильнее, не теряй ленту после смерти",
-            "why": "GPM просел относительно формы",
-        })
+    def add_w(title, detail, evidence):
+        weaknesses.append({"title": title, "detail": detail, "evidence": evidence})
 
-    if not strengths and won:
-        strengths.append({
-            "title": "Победа",
-            "detail": "Матч выигран.",
-            "evidence": "won=true",
-        })
-    if not weaknesses and not won:
-        weaknesses.append({
-            "title": "Поражение",
-            "detail": "Матч проигран — сверь deaths и участие в файтах.",
-            "evidence": "won=false",
-        })
+    def add_r(priority, action, why):
+        recs.append({"priority": priority, "action": action, "why": why})
+
+    # --- K/D ---
+    kd_delta = d.get("kd_vs_avg")
+    if kd_delta is not None:
+        if kd_delta >= 0.25:
+            add_s(
+                "K/D выше формы",
+                "Отношение убийств к смертям лучше, чем в последних играх.",
+                f"KD {kd} vs ср. {r20.get('avg_kd')} (Δ {kd_delta:+})",
+            )
+        elif kd_delta <= -0.25:
+            add_w(
+                "K/D ниже формы",
+                "Ты умирал чаще или меньше влиял на убийства, чем обычно.",
+                f"KD {kd} vs ср. {r20.get('avg_kd')} (Δ {kd_delta:+})",
+            )
+            add_r(1, "Меньше соло-заходов до ключевых предметов", "K/D просел относительно твоей нормы")
+
+    # --- Deaths ---
+    death_delta = d.get("deaths_vs_avg")
+    if death_delta is not None and death_delta >= 2:
+        add_w(
+            "Много смертей",
+            "Смертей заметно больше обычного — теряешь темп и опыт.",
+            f"Deaths {deaths} vs ср. {r20.get('avg_deaths')} (Δ {death_delta:+})",
+        )
+        add_r(1, "Играй ближе к тиммейтам до 20 минуты", "Высокий death count относительно формы")
+
+    if deaths is not None and deaths >= 10:
+        add_w(
+            "Очень высокий death count",
+            f"В матче {deaths} смертей — это сильно бьёт по опыту и карте.",
+            f"deaths={deaths}",
+        )
+
+    # --- Kills ---
+    kill_delta = d.get("kills_vs_avg")
+    if kill_delta is not None and kill_delta <= -5:
+        add_w(
+            "Мало убийств",
+            "Участие в киллах ниже обычного.",
+            f"Kills {k} vs ср. {r20.get('avg_kills')} (Δ {kill_delta:+})",
+        )
+
+    if k is not None and k == 0 and (deaths or 0) >= 5:
+        add_w(
+            "0 убийств",
+            "Нет киллов при заметном числе смертей — низкое влияние на файты.",
+            f"KDA {k}/{deaths}/{a}",
+        )
+        add_r(2, "Ищи файты с напарником, не в одиночку", "0 kills при высоком deaths")
+
+    # --- GPM / XPM ---
+    gpm_delta = d.get("gpm_vs_avg")
+    if gpm_delta is not None:
+        if gpm_delta >= 50:
+            add_s(
+                "Сильный фарм",
+                "GPM выше твоей средней формы.",
+                f"GPM {gpm} vs ср. {r20.get('avg_gpm')} (Δ {gpm_delta:+})",
+            )
+        elif gpm_delta <= -50:
+            add_w(
+                "Слабый фарм",
+                "Золота в минуту заметно меньше обычного.",
+                f"GPM {gpm} vs ср. {r20.get('avg_gpm')} (Δ {gpm_delta:+})",
+            )
+            add_r(2, "После смерти быстрее возвращайся на линию/лес", "GPM ниже формы")
+
+    xpm_delta = d.get("xpm_vs_avg")
+    if xpm_delta is not None and xpm_delta <= -80:
+        add_w(
+            "Отставание по опыту",
+            "XPM сильно ниже нормы — уровень и скилы открываются позже.",
+            f"XPM {xpm} vs ср. {r20.get('avg_xpm')} (Δ {xpm_delta:+})",
+        )
+
+    # --- Outcome ---
+    if won is True:
+        add_s("Победа", "Матч выигран.", "won=true")
+    elif won is False:
+        add_w("Поражение", "Матч проигран.", "won=false")
+
+    # --- fallbacks ---
+    if not strengths and not weaknesses:
+        add_w(
+            "Мало данных для разбора",
+            "Не хватило статистики, чтобы выделить паттерны.",
+            "empty strengths/weaknesses",
+        )
 
     if not recs:
-        recs.append({
-            "priority": 1,
-            "action": "Сравни deaths и GPM со своей средней формой в следующих 3 катках",
-            "why": "Нужна стабильность показателей",
-        })
+        add_r(
+            1,
+            "Сравни deaths и GPM со своей средней формой в следующих 3 катках",
+            "Нужна стабильность показателей",
+        )
 
+    # score
     score = 50
-    score += 10 if won else -10
-    score += 8 if d.get("kd_vs_avg", 0) > 0.15 else 0
-    score -= 8 if d.get("kd_vs_avg", 0) < -0.15 else 0
+    if won is True:
+        score += 12
+    elif won is False:
+        score -= 12
+    if kd_delta is not None:
+        score += 8 if kd_delta > 0.2 else (-8 if kd_delta < -0.2 else 0)
+    if gpm_delta is not None:
+        score += 5 if gpm_delta > 40 else (-5 if gpm_delta < -40 else 0)
+    if deaths is not None and deaths >= 10:
+        score -= 8
     score = max(0, min(100, score))
 
+    if won is True and score >= 58:
+        headline = "Победа, выше своей формы" if score >= 65 else "Победа"
+    elif won is False and score <= 45:
+        headline = "Поражение, ниже формы"
+    elif won is False:
+        headline = "Поражение"
+    else:
+        headline = "Разбор матча"
+
     return {
-        "headline": "Победа выше своей  формы" if won and score >= 60 else(
-            "Поражение, ниже формы" if not won and score < 50 else "Разбор матча"
-        ),
+        "headline": headline,
         "score_0_100": score,
-        "strengths": strengths[:4],
-        "weakness": weaknesses[:4],
+        "strengths": strengths[:5],
+        "weaknesses": weaknesses[:5],
         "recommendations": recs[:4],
-        "one_liner": recs[0]["action"] if recs else "Смотрим  форму по KDA и GPM",
+        "one_liner": recs[0]["action"] if recs else "Смотри KDA и GPM относительно формы",
     }
+
