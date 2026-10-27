@@ -68,117 +68,65 @@ def _heuristic_report(snapshot: dict) -> dict:
     gpm = m.get("gpm")
     xpm = m.get("xpm")
     kd = m.get("kd")
-    kda = m.get("kda")
 
     strengths, weaknesses, recs = [], [], []
 
     def add_s(title, detail, evidence):
-        strengths.append({"title": title, "detail": detail, "evidence": evidence})
+        strengths.append({"title": title, "detail": detail, "evidence": str(evidence)})
 
     def add_w(title, detail, evidence):
-        weaknesses.append({"title": title, "detail": detail, "evidence": evidence})
+        weaknesses.append({"title": title, "detail": detail, "evidence": str(evidence)})
 
     def add_r(priority, action, why):
         recs.append({"priority": priority, "action": action, "why": why})
 
-    # --- K/D ---
     kd_delta = d.get("kd_vs_avg")
     if kd_delta is not None:
         if kd_delta >= 0.25:
-            add_s(
-                "K/D выше формы",
-                "Отношение убийств к смертям лучше, чем в последних играх.",
-                f"KD {kd} vs ср. {r20.get('avg_kd')} (Δ {kd_delta:+})",
-            )
+            add_s("K/D выше формы", "Лучше обычного соотношения убийств к смертям.", f"KD {kd} vs {r20.get('avg_kd')} (Δ {kd_delta:+})")
         elif kd_delta <= -0.25:
-            add_w(
-                "K/D ниже формы",
-                "Ты умирал чаще или меньше влиял на убийства, чем обычно.",
-                f"KD {kd} vs ср. {r20.get('avg_kd')} (Δ {kd_delta:+})",
-            )
-            add_r(1, "Меньше соло-заходов до ключевых предметов", "K/D просел относительно твоей нормы")
+            add_w("K/D ниже формы", "Хуже обычного K/D — больше смертей или меньше киллов.", f"KD {kd} vs {r20.get('avg_kd')} (Δ {kd_delta:+})")
+            add_r(1, "Меньше соло-заходов до ключевых предметов", "K/D просел относительно нормы")
 
-    # --- Deaths ---
     death_delta = d.get("deaths_vs_avg")
     if death_delta is not None and death_delta >= 2:
-        add_w(
-            "Много смертей",
-            "Смертей заметно больше обычного — теряешь темп и опыт.",
-            f"Deaths {deaths} vs ср. {r20.get('avg_deaths')} (Δ {death_delta:+})",
-        )
-        add_r(1, "Играй ближе к тиммейтам до 20 минуты", "Высокий death count относительно формы")
+        add_w("Много смертей", "Смертей больше, чем обычно.", f"Deaths {deaths} vs ср. {r20.get('avg_deaths')} (Δ {death_delta:+})")
+        add_r(1, "Играй ближе к тиммейтам до 20 минуты", "Высокий death count")
 
     if deaths is not None and deaths >= 10:
-        add_w(
-            "Очень высокий death count",
-            f"В матче {deaths} смертей — это сильно бьёт по опыту и карте.",
-            f"deaths={deaths}",
-        )
+        add_w("Очень высокий death count", f"{deaths} смертей в одном матче — сильный штраф по опыту и карте.", f"deaths={deaths}")
 
-    # --- Kills ---
     kill_delta = d.get("kills_vs_avg")
     if kill_delta is not None and kill_delta <= -5:
-        add_w(
-            "Мало убийств",
-            "Участие в киллах ниже обычного.",
-            f"Kills {k} vs ср. {r20.get('avg_kills')} (Δ {kill_delta:+})",
-        )
+        add_w("Мало убийств", "Килл-участие ниже обычного.", f"Kills {k} vs ср. {r20.get('avg_kills')} (Δ {kill_delta:+})")
 
     if k is not None and k == 0 and (deaths or 0) >= 5:
-        add_w(
-            "0 убийств",
-            "Нет киллов при заметном числе смертей — низкое влияние на файты.",
-            f"KDA {k}/{deaths}/{a}",
-        )
-        add_r(2, "Ищи файты с напарником, не в одиночку", "0 kills при высоком deaths")
+        add_w("0 убийств", "Нет киллов при большом числе смертей.", f"KDA {k}/{deaths}/{a}")
+        add_r(2, "Ищи файты с напарником", "0 kills при высоком deaths")
 
-    # --- GPM / XPM ---
     gpm_delta = d.get("gpm_vs_avg")
     if gpm_delta is not None:
         if gpm_delta >= 50:
-            add_s(
-                "Сильный фарм",
-                "GPM выше твоей средней формы.",
-                f"GPM {gpm} vs ср. {r20.get('avg_gpm')} (Δ {gpm_delta:+})",
-            )
+            add_s("Сильный фарм", "GPM выше твоей формы.", f"GPM {gpm} vs {r20.get('avg_gpm')} (Δ {gpm_delta:+})")
         elif gpm_delta <= -50:
-            add_w(
-                "Слабый фарм",
-                "Золота в минуту заметно меньше обычного.",
-                f"GPM {gpm} vs ср. {r20.get('avg_gpm')} (Δ {gpm_delta:+})",
-            )
+            add_w("Слабый фарм", "GPM заметно ниже обычного.", f"GPM {gpm} vs {r20.get('avg_gpm')} (Δ {gpm_delta:+})")
             add_r(2, "После смерти быстрее возвращайся на линию/лес", "GPM ниже формы")
 
     xpm_delta = d.get("xpm_vs_avg")
     if xpm_delta is not None and xpm_delta <= -80:
-        add_w(
-            "Отставание по опыту",
-            "XPM сильно ниже нормы — уровень и скилы открываются позже.",
-            f"XPM {xpm} vs ср. {r20.get('avg_xpm')} (Δ {xpm_delta:+})",
-        )
+        add_w("Отставание по опыту", "XPM сильно ниже нормы.", f"XPM {xpm} vs {r20.get('avg_xpm')} (Δ {xpm_delta:+})")
 
-    # --- Outcome ---
     if won is True:
         add_s("Победа", "Матч выигран.", "won=true")
     elif won is False:
         add_w("Поражение", "Матч проигран.", "won=false")
 
-    # --- fallbacks ---
     if not strengths and not weaknesses:
-        add_w(
-            "Мало данных для разбора",
-            "Не хватило статистики, чтобы выделить паттерны.",
-            "empty strengths/weaknesses",
-        )
+        add_w("Мало данных", "Недостаточно статистики для детального разбора.", "empty")
 
     if not recs:
-        add_r(
-            1,
-            "Сравни deaths и GPM со своей средней формой в следующих 3 катках",
-            "Нужна стабильность показателей",
-        )
+        add_r(1, "Сравни deaths и GPM со средней формой в следующих 3 катках", "Нужна стабильность")
 
-    # score
     score = 50
     if won is True:
         score += 12
@@ -192,8 +140,10 @@ def _heuristic_report(snapshot: dict) -> dict:
         score -= 8
     score = max(0, min(100, score))
 
-    if won is True and score >= 58:
-        headline = "Победа, выше своей формы" if score >= 65 else "Победа"
+    if won is True and score >= 65:
+        headline = "Победа, выше своей формы"
+    elif won is True:
+        headline = "Победа"
     elif won is False and score <= 45:
         headline = "Поражение, ниже формы"
     elif won is False:
