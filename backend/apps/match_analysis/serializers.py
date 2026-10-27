@@ -22,7 +22,7 @@ class MatchAnalysisSerializer(serializers.ModelSerializer):
             "game",
             "external_match_id",
             "status",
-            "input_snapshots",
+            "input_snapshot",
             "report_json",
             "model_name",
             "error_message",

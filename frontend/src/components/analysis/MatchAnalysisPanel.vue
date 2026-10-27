@@ -29,7 +29,9 @@ const score = computed(() => {
 
 const form = computed(() => recent.value.form || [])
 const strengths = computed(() => report.value.strengths || [])
-const weaknesses = computed(() => report.value.weaknesses || [])
+const weaknesses = computed(
+  () => report.value.weaknesses || report.value.weakness || []
+)
 const recs = computed(() => report.value.recommendations || [])
 
 const won = computed(() => match.value.won)
