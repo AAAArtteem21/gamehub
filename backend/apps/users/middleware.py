@@ -47,22 +47,41 @@ class SecurityHeadersMiddleware:
         return response
 
 
+SKIP_PREFIXES = ("/static/", "/media/", "/health")
+
+
 class RequestErrorLogMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         response = self.get_response(request)
-        if response.status_code >= 400:
-            user = getattr(request, "user", None)
+
+        path = request.path or ""
+        if any(path.startswith(p) for p in SKIP_PREFIXES):
+            return response
+
+        code = response.status_code
+
+        if code >= 400:
             app_log(
-                f"{request.method} {request.path} -> {response.status_code}",
-                level="error" if response.status_code >= 500 else "warning",
+                f"{request.method} {path} → {code}",
+                level="error" if code >= 500 else "warning",
                 source="http",
-                user=user if getattr(user, "pk", None) else None,
-                path=request.path,
-                method=request.method,
-                status_code=response.status_code,
+                request=request,
+                status_code=code,
             )
+            return response
+
+        if code < 400 and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            if path.startswith("/api/"):
+                app_log(
+                    f"{request.method} {path} → {code}",
+                    level="info",
+                    source="api",
+                    request=request,
+                    status_code=code,
+                )
+
         return response
 
