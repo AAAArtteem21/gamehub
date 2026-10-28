@@ -143,6 +143,15 @@ def run_dota_analysis(analysis: MatchAnalysis, steam32: int, hint=None) -> Match
         analysis.finished_at = timezone.now()
         analysis.save()
     except Exception as e:
+        from apps.users.logging_utils import app_log
+
+        app_log(
+            f"Dota analysis failed: {e}",
+            level="error",
+            source="match_analysis",
+            user=analysis.user,
+            extra={"match_id": analysis.external_match_id},
+        )
         analysis.status = MatchAnalysis.Status.FAILED
         analysis.error_message = str(e)[:500]
         analysis.finished_at = timezone.now()
