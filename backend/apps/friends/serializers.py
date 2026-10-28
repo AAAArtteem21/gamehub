@@ -5,9 +5,9 @@ from .models import Friendship, FriendRequest, PlayStatus
 
 User = get_user_model()
 
-def _avatar(self):
-    profile = getattr(User, "profile",None)
-    return getattr(profile, "avatar_url", None) if profile else None 
+def _avatar(user):
+    profile = getattr(user, "profile", None)
+    return getattr(profile, "avatar_url", None) if profile else None
 
 def _presence_payload(user):
     p = getattr(user, "presence", None)
@@ -31,7 +31,7 @@ def user_card(user):
         "id": user.id,
         "username": user_public_name(user),
         "avatar_url": _avatar(user),
-        "presense": _presence_payload(user),
+        "presence": _presence_payload(user),
     }
 
 class PresenceSerializer(serializers.Serializer):
@@ -58,12 +58,21 @@ class FriendRequestCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Пользователь не найден")
         if Friendship.are_friends(request.user.id, value):
             raise serializers.ValidationError("Уже друзья")
-        if Friendship.objects.filter(
+
+        if FriendRequest.objects.filter(
+            from_user=request.user,
+            to_user_id=value,
+            status=FriendRequest.STATUS_PENDING,
+        ).exists():
+            raise serializers.ValidationError("Заявка уже отправлена")
+
+        if FriendRequest.objects.filter(
             from_user_id=value,
             to_user=request.user,
-            status=Friendship.STATUS_PENDING,
-        ).exsits():
-            raise serializers.ValidationError("уже есть входящая заявка прими ее")
+            status=FriendRequest.STATUS_PENDING,
+        ).exists():
+            raise serializers.ValidationError("Уже есть входящая заявка — прими её")
+
         return value
 
 class InviteSerializer(serializers.Serializer):
