@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import UserProfile, ProfileView, Notification
+from .models import UserProfile, ProfileView, Notification, AppLog
 from .xp import add_xp
 
 User = get_user_model()
@@ -127,3 +127,19 @@ class ProfileViewAdmin(admin.ModelAdmin):
     search_fields = ("viewer__username", "viewed_user__username")
     raw_id_fields = ("viewer", "viewed_user")
     readonly_fields = ("viewed_at",)
+
+@admin.register(AppLog)
+class AppLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "level", "source", "status_code", "user", "short_msg", "path")
+    list_filter = ("level", "source", "status_code", "created_at")
+    search_fields = ("message", "path","user__username")
+    readonly_fields = (
+        "level", "source", "message", "path", "method",
+        "status_code", "user", "extra", "created_at",
+    )
+    date_hierarchy = "created_at"
+    ordering = ("-created_at",)
+
+    @admin.display(description="message")
+    def short_msg(self, obj):
+        return (obj.message or "")[:80]

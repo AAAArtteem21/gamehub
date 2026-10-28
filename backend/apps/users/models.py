@@ -105,3 +105,38 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.user_id}: {self.title}"
+
+
+class AppLog(models.Model):
+    class Level(models.TextChoices):
+        DEBUG = "debug", "Debug"
+        INFO = "info", "Info"
+        WARNING = "warning", "Warning"
+        ERROR = "error", "Error"
+        CRITICAL = "critical", "Critical"
+
+    level = models.CharField(max_length=16, choices=Level.choices, default=Level.INFO, db_index=True)
+    source = models.CharField(max_length=64, blank=True, db_index=True)
+    message = models.TextField()
+    path = models.CharField(max_length=255, blank=True)
+    method = models.CharField(max_length=10, blank=True)
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="app_logs",
+    )
+    extra = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at", "level"]),
+            models.Index(fields=["source", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.level}] {self.message[:60]}"

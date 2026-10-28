@@ -1,3 +1,5 @@
+from .logging_utils import app_log
+
 class SecurityHeadersMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -43,3 +45,24 @@ class SecurityHeadersMiddleware:
             response["Expires"] = "0"
 
         return response
+
+
+class RequestErrorLogMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if response.status_code >= 400:
+            user = getattr(request, "user", None)
+            app_log(
+                f"{request.method} {request.path} -> {response.status_code}",
+                level="error" if response.status_code >= 500 else "warning",
+                source="http",
+                user=user if getattr(user, "pk", None) else None,
+                path=request.path,
+                method=request.method,
+                status_code=response.status_code,
+            )
+        return response
+
