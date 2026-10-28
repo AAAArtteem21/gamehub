@@ -118,13 +118,13 @@ class AppLog(models.Model):
     level = models.CharField(max_length=16, choices=Level.choices, default=Level.INFO, db_index=True)
     source = models.CharField(max_length=64, blank=True, db_index=True)
     message = models.TextField()
-    path = models.CharField(max_length=255, blank=True)
+    path = models.CharField(max_length=255, blank=True, db_index=True)
     method = models.CharField(max_length=10, blank=True)
-    status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
+        null=True, blank=True,
         on_delete=models.SET_NULL,
         related_name="app_logs",
     )
@@ -137,6 +137,3 @@ class AppLog(models.Model):
             models.Index(fields=["-created_at", "level"]),
             models.Index(fields=["source", "-created_at"]),
         ]
-
-    def __str__(self):
-        return f"[{self.level}] {self.message[:60]}"

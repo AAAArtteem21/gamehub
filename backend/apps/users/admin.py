@@ -130,16 +130,21 @@ class ProfileViewAdmin(admin.ModelAdmin):
 
 @admin.register(AppLog)
 class AppLogAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "level", "source", "status_code", "user", "short_msg", "path")
-    list_filter = ("level", "source", "status_code", "created_at")
-    search_fields = ("message", "path","user__username")
-    readonly_fields = (
-        "level", "source", "message", "path", "method",
-        "status_code", "user", "extra", "created_at",
+    list_display = (
+        "created_at", "level", "source", "status_code",
+        "user", "ip", "method", "path_short", "msg_short",
     )
+    list_filter = ("level", "source", "status_code", "method", "created_at")
+    search_fields = ("message", "path", "ip", "user__username", "extra")
+    readonly_fields = [f.name for f in AppLog._meta.fields]
     date_hierarchy = "created_at"
+    list_per_page = 50
     ordering = ("-created_at",)
 
+    @admin.display(description="path")
+    def path_short(self, obj):
+        return (obj.path or "")[:40]
+
     @admin.display(description="message")
-    def short_msg(self, obj):
-        return (obj.message or "")[:80]
+    def msg_short(self, obj):
+        return (obj.message or "")[:70]
