@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth'
 import UniversalStatsCard from '../components/profiles/UniversalStatsCard.vue'
 import MatchParticipantsModal from '../components/profiles/MatchParticipantsModal.vue'
 import ValorantMatchModal from '../components/profiles/ValorantMatchModal.vue'
+import AddFriendButton from '../components/friends/AddFriendButton.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -497,6 +498,10 @@ watch(() => route.params.id, load)
               <button type="button" class="btn-secondary" @click="toggleFav">
                 {{ isFav ? '★ В избранном' : '☆ В избранное' }}
               </button>
+              <AddFriendButton
+                v-if="authStore.isAuthenticated"
+                :user-id="route.params.id"
+              />
             </div>
             <div class="header-actions" v-else>
               <button type="button" class="btn-secondary" @click="router.push('/profile')">

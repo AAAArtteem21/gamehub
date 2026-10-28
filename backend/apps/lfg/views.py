@@ -35,6 +35,10 @@ class LFGPostViewSet(viewsets.ModelViewSet):
             )
             .order_by("-created_at")
         )
+
+        if self.action in ("retrieve", "close", "applications", "partial_update", "update", "destroy"):
+            return qs
+
         game = self.request.query_params.get("game")
         status_param = self.request.query_params.get("status")
         search = self.request.query_params.get("search")
@@ -43,6 +47,7 @@ class LFGPostViewSet(viewsets.ModelViewSet):
             qs = qs.filter(game__iexact=game)
         if search:
             qs = qs.filter(Q(game__icontains=search) | Q(description__icontains=search))
+
         if status_param:
             qs = qs.filter(status=status_param)
         else:
@@ -51,6 +56,24 @@ class LFGPostViewSet(viewsets.ModelViewSet):
             qs = qs.exclude(datetime__lt=cutoff)
 
         return qs
+
+    def retrieve(self, request, *args, **kwargs):
+        post = self.get_object()
+        user = request.user
+
+        if post.status == "open":
+            return Response(self.get_serializer(post).data)
+
+        if user.is_authenticated:
+            if post.author_id == user.id:
+                return Response(self.get_serializer(post).data)
+            if post.responses.filter(user=user, status="accepted").exists():
+                return Response(self.get_serializer(post).data)
+
+        return Response(
+            {"detail": "Заявка не найдена или закрыта"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
     @method_decorator(ratelimit(key="user", rate="5/h", block=True))
     def create(self, request, *args, **kwargs):
@@ -200,12 +223,49 @@ class LFGChatMessageViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "post"]
 
+    def _can_access_post(self, user, post) -> bool:
+        if post.author_id == user.id:
+            return True
+        return post.responses.filter(user=user, status="accepted").exists()
+
     def get_queryset(self):
-        qs = LFGChatMessage.objects.select_related("sender", "sender__profile", "post")
+        user = self.request.user
+        qs = LFGChatMessage.objects.select_related(
+            "sender", "sender__profile", "post"
+        )
         post_id = self.request.query_params.get("post")
-        if post_id:
-            qs = qs.filter(post_id=post_id)
-        return qs
+        if not post_id:
+            return qs.none()
+
+        try:
+            post = LFGPost.objects.get(pk=post_id)
+        except LFGPost.DoesNotExist:
+            return qs.none()
+
+        if not self._can_access_post(user, post):
+            return qs.none()
+
+        return qs.filter(post_id=post_id)
+
+    def create(self, request, *args, **kwargs):
+        post_id = request.data.get("post")
+        if not post_id:
+            return Response({"detail": "post обязателен"}, status=400)
+        try:
+            post = LFGPost.objects.get(pk=post_id)
+        except LFGPost.DoesNotExist:
+            return Response({"detail": "Пост не найден"}, status=404)
+
+        if not self._can_access_post(request.user, post):
+            return Response(
+                {"detail": "Нет доступа к чату. Нужно быть автором или принятым."},
+                status=403,
+            )
+
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        serializer.save(sender=self.request.user)
 
 
 class MyApplicationsView(APIView):
