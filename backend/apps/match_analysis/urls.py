@@ -1,8 +1,9 @@
 from django.urls import path
-from .views import MyDotaAnalysesView,CreateDotaAnalysisView,MatchAnalysisDetailView
+from .views import MyDotaAnalysesView,CreateDotaAnalysisView,MatchAnalysisDetailView,CreateFaceitAnalysisView
 
 urlpatterns = [
     path("analysis/dota/", CreateDotaAnalysisView.as_view()),
     path("analysis/dota/list/", MyDotaAnalysesView.as_view()),
     path("analysis/<int:pk>/", MatchAnalysisDetailView.as_view()),
+    path("analysis/faceit/", CreateFaceitAnalysisView.as_view()),
 ]
