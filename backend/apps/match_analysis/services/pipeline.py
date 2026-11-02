@@ -2,9 +2,11 @@ from django.utils import timezone
 
 from apps.match_analysis.models import MatchAnalysis
 
-from .ai_analyzer import analyze_dota_snapshot
+from .ai_analyzer import analyze_dota_snapshot, analyze_faceit_snapshot
 from .match_loader import load_dota_match_context
 from .statistics import _kd, _kda, build_dota_snapshot
+from .faceit_loader import load_faceit_match_context, parse_kda
+from .statistics_faceit import build_faceit_snapshot
 
 
 def snapshot_from_hint(match_id, steam32, hint: dict) -> dict:
@@ -152,6 +154,109 @@ def run_dota_analysis(analysis: MatchAnalysis, steam32: int, hint=None) -> Match
             user=analysis.user,
             extra={"match_id": analysis.external_match_id},
         )
+        analysis.status = MatchAnalysis.Status.FAILED
+        analysis.error_message = str(e)[:500]
+        analysis.finished_at = timezone.now()
+        analysis.save()
+
+    return analysis
+
+def _merge_faceit_hint(snapshot: dict, hint: dict) -> dict:
+    if not hint:
+        return snapshot
+    m = snapshot.setdefault("match", {})
+    for k, v in hint.items():
+        if v is not None and m.get(k) is None:
+            m[k] = v
+    if m.get("kills") is None and hint.get("kda"):
+        k, d, a = parse_kda(hint["kda"])
+        m["kills"], m["deaths"], m["assists"] = k, d, a
+    if m.get("kills") is not None and m.get("kd") is None:
+        from .statistics_faceit import _kd
+        m["kd"] = _kd(m.get("kills"), m.get("deaths"))
+    snapshot["match"] = m
+    return snapshot
+
+
+def run_faceit_analysis(
+    analysis: MatchAnalysis,
+    *,
+    payload: dict | None = None,
+    faceit_player_id: str | None = None,
+    gamehub_user_id: int | None = None,
+    recent: list | None = None,
+    hint: dict | None = None,
+) -> MatchAnalysis:
+    hint = dict(hint or {})
+    analysis.status = MatchAnalysis.Status.RUNNING
+    analysis.error_message = ""
+    analysis.save(update_fields=["status", "error_message"])
+
+    try:
+        if not payload and not hint:
+            raise ValueError("Нет данных матча Faceit")
+
+        if payload:
+            ctx = load_faceit_match_context(
+                payload=payload,
+                faceit_player_id=faceit_player_id,
+                gamehub_user_id=gamehub_user_id,
+                recent=recent or [],
+            )
+        else:
+            ctx = {
+                "platform": "faceit",
+                "game": "cs2",
+                "match_id": analysis.external_match_id,
+                "match": dict(hint),
+                "recent": recent or [],
+                "limits": ["только hint с фронта"],
+            }
+
+        snapshot = build_faceit_snapshot(ctx)
+        snapshot = _merge_faceit_hint(snapshot, hint)
+
+        m = snapshot.get("match") or {}
+        if m.get("kills") is None and m.get("kd") is None:
+            analysis.status = MatchAnalysis.Status.FAILED
+            analysis.error_message = "Нет статистики игрока в матче Faceit"
+            analysis.input_snapshot = snapshot
+            analysis.finished_at = timezone.now()
+            analysis.save()
+            return analysis
+
+        report, model_name = analyze_faceit_snapshot(snapshot)
+        m = snapshot.get("match") or {}
+        report["match_stats"] = {
+            "kills": m.get("kills"),
+            "deaths": m.get("deaths"),
+            "assists": m.get("assists"),
+            "kd": m.get("kd"),
+            "headshots": m.get("headshots"),
+            "hs_percent": m.get("hs_percent"),
+            "mvps": m.get("mvps"),
+            "map": m.get("map"),
+            "score": m.get("score"),
+            "won": m.get("won"),
+        }
+        report["recent_stats"] = snapshot.get("recent_20") or {}
+        report["deltas"] = snapshot.get("deltas") or {}
+
+        analysis.input_snapshot = snapshot
+        analysis.report_json = report
+        analysis.model_name = model_name
+        analysis.game = "cs2"
+        analysis.platform = MatchAnalysis.Platform.FACEIT
+        analysis.status = MatchAnalysis.Status.READY
+        analysis.error_message = ""
+        analysis.finished_at = timezone.now()
+        analysis.save()
+    except PermissionError as e:
+        analysis.status = MatchAnalysis.Status.FAILED
+        analysis.error_message = str(e)
+        analysis.finished_at = timezone.now()
+        analysis.save()
+    except Exception as e:
         analysis.status = MatchAnalysis.Status.FAILED
         analysis.error_message = str(e)[:500]
         analysis.finished_at = timezone.now()
