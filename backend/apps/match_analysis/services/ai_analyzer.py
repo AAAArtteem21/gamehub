@@ -160,3 +160,84 @@ def _heuristic_report(snapshot: dict) -> dict:
         "one_liner": recs[0]["action"] if recs else "Смотри KDA и GPM относительно формы",
     }
 
+def _heuristic_faceit(snapshot: dict) -> dict:
+    m = snapshot.get("match") or {}
+    d = snapshot.get("deltas") or {}
+    r20 = snapshot.get("recent_20") or {}
+    won = m.get("won")
+
+    strengths, weaknesses, recs = [], [], []
+
+    def add_s(t, detail, ev):
+        strengths.append({"title": t, "detail": detail, "evidence": str(ev)})
+
+    def add_w(t, detail, ev):
+        weaknesses.append({"title": t, "detail": detail, "evidence": str(ev)})
+
+    def add_r(pri, action, why):
+        recs.append({"priority": pri, "action": action, "why": why})
+
+    kd_d = d.get("kd_vs_avg")
+    if kd_d is not None:
+        if kd_d >= 0.2:
+            add_s("K/D выше формы", "Лучше обычного K/D.", f"KD {m.get('kd')} vs {r20.get('avg_kd')}")
+        elif kd_d <= -0.2:
+            add_w("K/D ниже формы", "Хуже обычного K/D.", f"KD {m.get('kd')} vs {r20.get('avg_kd')}")
+            add_r(1, "Меньше пиков 1в1 без инфы", "K/D просел")
+
+    if d.get("deaths_vs_avg") is not None and d["deaths_vs_avg"] >= 3:
+        add_w("Много смертей", "Смертей больше обычного.", f"deaths={m.get('deaths')}")
+
+    hs = m.get("hs_percent")
+    if hs is not None and hs >= 50:
+        add_s("Высокий HS%", "Меткость по головам выше средней.", f"HS%={hs}")
+    elif hs is not None and hs < 25 and (m.get("kills") or 0) >= 10:
+        add_w("Низкий HS%", "Мало хедшотов при заметных киллах.", f"HS%={hs}")
+
+    mvps = m.get("mvps")
+    if mvps is not None and mvps >= 4:
+        add_s("Много MVP", "Сильное влияние на раунды.", f"MVP={mvps}")
+
+    if won is True:
+        add_s("Победа", f"Карта {m.get('map') or '—'} · {m.get('score') or ''}".strip(), "won=true")
+    elif won is False:
+        add_w("Поражение", f"Карта {m.get('map') or '—'} · {m.get('score') or ''}".strip(), "won=false")
+
+    if not strengths and not weaknesses:
+        add_w("Мало данных", "Недостаточно статистики.", "empty")
+
+    if not recs:
+        add_r(1, "Сравни K/D и смерти со средней формой в следующих 5 катках", "Стабильность")
+
+    score = 50
+    if won is True:
+        score += 12
+    elif won is False:
+        score -= 12
+    if kd_d is not None:
+        score += 8 if kd_d > 0.2 else (-8 if kd_d < -0.2 else 0)
+    score = max(0, min(100, score))
+
+    if won and score >= 65:
+        headline = "Победа, выше своей формы"
+    elif won:
+        headline = "Победа"
+    elif won is False and score <= 45:
+        headline = "Поражение, ниже формы"
+    elif won is False:
+        headline = "Поражение"
+    else:
+        headline = "Разбор Faceit"
+
+    return {
+        "headline": headline,
+        "score_0_100": score,
+        "strengths": strengths[:5],
+        "weaknesses": weaknesses[:5],
+        "recommendations": recs[:4],
+        "one_liner": recs[0]["action"] if recs else "Смотри K/D относительно формы",
+    }
+
+
+def analyze_faceit_snapshot(snapshot: dict) -> tuple[dict, str]:
+    return _heuristic_faceit(snapshot), "heuristic"
