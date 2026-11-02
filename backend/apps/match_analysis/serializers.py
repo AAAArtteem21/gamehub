@@ -29,3 +29,15 @@ class MatchAnalysisSerializer(serializers.ModelSerializer):
             "finished_at"
         ]
         read_only_fields = fields
+
+class CreateFaceitAnalysisSerializer(serializers.Serializer):
+    match_id = serializers.CharField(max_length=64)
+    kills = serializers.IntegerField(required=False, allow_null=True)
+    deaths = serializers.IntegerField(required=False, allow_null=True)
+    assists = serializers.IntegerField(required=False, allow_null=True)
+    kda = serializers.CharField(required=False, allow_blank=True, max_length=32)
+    kd = serializers.FloatField(required=False, allow_null=True)
+    headshots = serializers.IntegerField(required=False, allow_null=True)
+    mvps = serializers.IntegerField(required=False, allow_null=True)
+    map = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    won = serializers.BooleanField(required=False, allow_null=True)

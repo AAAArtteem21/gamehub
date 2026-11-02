@@ -3,8 +3,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import MatchAnalysis
-from .serializers import MatchAnalysisSerializer,CreateDotaAnalystSerializer
-from .services.pipeline import run_dota_analysis
+from .serializers import MatchAnalysisSerializer,CreateDotaAnalystSerializer,CreateFaceitAnalysisSerializer
+from .services.pipeline import run_dota_analysis, run_faceit_analysis
 
 def resolve_steam32(user) -> int | None:
     """
@@ -134,3 +134,117 @@ class MyDotaAnalysesView(APIView):
             user=request.user, platform=MatchAnalysis.Platform.OPENDOTA
         )[:30]
         return Response(MatchAnalysisSerializer(qs, many=True).data)
+
+def resolve_faceit_player_id(user) -> str | None:
+    profile = getattr(user, "profile", None)
+    if profile is None:
+        return None
+    accs = getattr(profile, "accounts", None)
+    if accs is None:
+        return None
+    acc = accs.filter(platform__iexact="faceit").first()
+    if not acc:
+        return None
+    return (
+        getattr(acc, "external_id", None)
+        or getattr(acc, "player_id", None)
+        or getattr(acc, "account_id", None)
+        or getattr(acc, "uid", None)
+    )
+
+
+def fetch_faceit_match_payload(match_id: str) -> dict | None:
+
+    try:
+        # from apps.profiles.services.faceit import get_match_detail
+        # return get_match_detail(match_id)
+        return None
+    except Exception:
+        return None
+
+
+class CreateFaceitAnalysisView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            ser = CreateFaceitAnalysisSerializer(data=request.data)
+            ser.is_valid(raise_exception=True)
+            match_id = str(ser.validated_data["match_id"]).strip()
+
+            hint = {
+                k: ser.validated_data[k]
+                for k in (
+                    "kills",
+                    "deaths",
+                    "assists",
+                    "kda",
+                    "kd",
+                    "headshots",
+                    "mvps",
+                    "map",
+                    "won",
+                )
+                if k in ser.validated_data and ser.validated_data.get(k) is not None
+            }
+
+            faceit_pid = resolve_faceit_player_id(request.user)
+            payload = fetch_faceit_match_payload(match_id)
+
+            analysis, created = MatchAnalysis.objects.get_or_create(
+                user=request.user,
+                platform=MatchAnalysis.Platform.FACEIT,
+                external_match_id=match_id,
+                defaults={"game": "cs2", "status": MatchAnalysis.Status.PENDING},
+            )
+
+            snap = analysis.input_snapshot or {}
+            match = snap.get("match") or {}
+            stats = (analysis.report_json or {}).get("match_stats") or {}
+            has_stats = analysis.status == MatchAnalysis.Status.READY and (
+                match.get("kills") is not None or stats.get("kills") is not None
+            )
+            if not created and has_stats:
+                return Response(MatchAnalysisSerializer(analysis).data)
+
+            analysis.status = MatchAnalysis.Status.PENDING
+            analysis.input_snapshot = {}
+            analysis.report_json = {}
+            analysis.error_message = ""
+            analysis.model_name = ""
+            analysis.finished_at = None
+            analysis.save(
+                update_fields=[
+                    "status",
+                    "input_snapshot",
+                    "report_json",
+                    "error_message",
+                    "model_name",
+                    "finished_at",
+                ]
+            )
+
+            analysis = run_faceit_analysis(
+                analysis,
+                payload=payload,
+                faceit_player_id=faceit_pid,
+                gamehub_user_id=request.user.id,
+                recent=[],
+                hint=hint,
+            )
+
+            if analysis.status == MatchAnalysis.Status.FAILED:
+                return Response(
+                    MatchAnalysisSerializer(analysis).data,
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(MatchAnalysisSerializer(analysis).data)
+
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            return Response(
+                {"detail": str(e), "type": type(e).__name__},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
