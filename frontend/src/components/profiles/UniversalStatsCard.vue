@@ -133,8 +133,9 @@ function closeMatch() {
         <MatchHistoryTable
           v-if="hasMatchHistory"
           :matches="stats.match_history"
+          :platform="platform"
           :can-open-participants="!!matchGame"
-          :enable-analysis="matchGame === 'dota2'"
+          :enable-analysis="matchGame === 'dota2' || matchGame === 'faceit'"
           @open-match="handleOpenMatch"
         />
 

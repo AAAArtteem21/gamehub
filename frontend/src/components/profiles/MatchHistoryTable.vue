@@ -54,16 +54,26 @@ async function analyzeMatch(m) {
   analyzeError.value = null
   try {
     const hint = extractHint(m)
-    const res = await analysisApi.createDota(m.match_id, hint)
+    const platform = String(
+      m.platform || props.platform || ''
+    ).toLowerCase()
+
+    const res =
+      platform === 'faceit'
+        ? await analysisApi.createFaceit(m.match_id, hint)
+        : await analysisApi.createDota(m.match_id, hint)
+
     const data = res.data
     if (data.status === 'failed') {
-      analyzeError.value = data.error_message || data.detail || 'Не удалось разобрать'
+      analyzeError.value =
+        data.error_message || data.detail || 'Не удалось разобрать'
       return
     }
     analysis.value = data
   } catch (e) {
     const d = e.response?.data
-    analyzeError.value = d?.detail || d?.error_message || e.message || 'Ошибка анализа'
+    analyzeError.value =
+      d?.detail || d?.error_message || e.message || 'Ошибка анализа'
   } finally {
     loadingId.value = null
   }
