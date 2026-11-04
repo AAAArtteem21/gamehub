@@ -154,13 +154,99 @@ def resolve_faceit_player_id(user) -> str | None:
 
 
 def fetch_faceit_match_payload(match_id: str) -> dict | None:
+    """Тот же состав, что MatchParticipantsView._faceit_participants."""
+    from apps.profiles.integrations.faceit_client import FaceitClient, FaceitError
+    from apps.profiles.models import GameAccount
 
     try:
-        # from apps.profiles.services.faceit import get_match_detail
-        # return get_match_detail(match_id)
-        return None
+        client = FaceitClient()
+        detail = client.get_match(match_id)
     except Exception:
         return None
+
+    teams = detail.get("teams") or {}
+    f1 = teams.get("faction1") or {}
+    f2 = teams.get("faction2") or {}
+    results = detail.get("results") or {}
+    score = results.get("score") or {}
+
+    per_player = {}
+    try:
+        stats_payload = client.get_match_stats(match_id)
+        for rnd in stats_payload.get("rounds") or []:
+            for team in rnd.get("teams") or []:
+                for p in team.get("players") or []:
+                    pid = p.get("player_id")
+                    if not pid:
+                        continue
+                    st = p.get("player_stats") or {}
+                    if pid not in per_player:
+                        per_player[pid] = {
+                            "kills": 0, "deaths": 0, "assists": 0,
+                            "headshots": 0, "mvps": 0,
+                        }
+                    per_player[pid]["kills"] += int(st.get("Kills") or st.get("kills") or 0)
+                    per_player[pid]["deaths"] += int(st.get("Deaths") or st.get("deaths") or 0)
+                    per_player[pid]["assists"] += int(st.get("Assists") or st.get("assists") or 0)
+                    per_player[pid]["headshots"] += int(
+                        st.get("Headshots") or st.get("headshots") or 0
+                    )
+                    per_player[pid]["mvps"] += int(st.get("MVPs") or st.get("mvps") or 0)
+    except Exception:
+        pass
+
+    def pack_roster(roster, team_key):
+        out = []
+        for p in roster or []:
+            pid = p.get("player_id")
+            nick = p.get("nickname") or "?"
+            st = per_player.get(pid) or {}
+            k, d, a = st.get("kills", 0), st.get("deaths", 0), st.get("assists", 0)
+
+            gh = GameAccount.objects.filter(
+                platform="faceit", external_id__iexact=nick
+            ).select_related("user").first()
+            if not gh and pid:
+                gh = GameAccount.objects.filter(
+                    platform="faceit", extra_stats__player_id=pid
+                ).select_related("user").first()
+
+            out.append({
+                "player_id": pid,
+                "nickname": nick,
+                "display_name": nick,
+                "avatar": p.get("avatar"),
+                "team": team_key,
+                "kda": f"{k}/{d}/{a}",
+                "headshots": st.get("headshots", 0),
+                "mvps": st.get("mvps", 0),
+                "is_gamehub_user": bool(gh),
+                "gamehub_user_id": gh.user_id if gh else None,
+            })
+        return out
+
+    participants = (
+        pack_roster(f1.get("roster") or f1.get("players"), "faction1")
+        + pack_roster(f2.get("roster") or f2.get("players"), "faction2")
+    )
+
+    map_name = None
+    voting = detail.get("voting") or {}
+    if isinstance(voting.get("map"), dict):
+        map_name = (voting["map"].get("pick") or [None])[0]
+    map_name = map_name or detail.get("map") or (detail.get("entity") or {}).get("name")
+
+    return {
+        "match_id": match_id,
+        "participants": participants,
+        "map": map_name,
+        "faction1_name": f1.get("name") or "Team 1",
+        "faction2_name": f2.get("name") or "Team 2",
+        "faction1_score": score.get("faction1"),
+        "faction2_score": score.get("faction2"),
+        "winner": results.get("winner"),
+        "competition": detail.get("competition_name") or detail.get("competition") or "",
+    }
 
 
 class CreateFaceitAnalysisView(APIView):
