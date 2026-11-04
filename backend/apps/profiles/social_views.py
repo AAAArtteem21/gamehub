@@ -44,14 +44,57 @@ def _primary_account(user, platforms=("opendota", "valorant", "faceit", "lol", "
 
 
 def _parse_match_date(m):
-    raw = m.get("played_at") or m.get("date")
-    if not raw:
+    raw = m.get("played_at") or m.get("date") or m.get("started_at") or m.get("start_time")
+    if raw is None or raw == "":
         return None
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"):
+
+    if isinstance(raw, (int, float)):
         try:
-            return datetime.strptime(str(raw)[:10], fmt).date()
+            ts = float(raw)
+            if ts > 1e12:
+                ts /= 1000.0
+            return datetime.utcfromtimestamp(ts).date()
+        except (ValueError, OSError, OverflowError):
+            return None
+
+    s = str(raw).strip()
+
+
+    if s.isdigit():
+        try:
+            ts = int(s)
+            if ts > 1e12:
+                ts //= 1000
+            return datetime.utcfromtimestamp(ts).date()
+        except (ValueError, OSError, OverflowError):
+            return None
+
+    for fmt in (
+        "%d.%m.%Y %H:%M",
+        "%d.%m.%Y",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+    ):
+        try:
+            chunk = s.replace("Z", "").split("+")[0].strip()
+            if "T" in chunk and fmt.startswith("%Y-%m-%dT"):
+                chunk = chunk[:19] if len(chunk) >= 19 else chunk
+            elif fmt == "%d.%m.%Y" and len(chunk) >= 10:
+                chunk = chunk[:10]
+            return datetime.strptime(chunk[:19] if "H" in fmt else chunk[:10], fmt).date()
         except ValueError:
             continue
+
+    try:
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        if len(s) >= 10 and s[2] == "." and s[5] == ".":
+            return datetime.strptime(s[:10], "%d.%m.%Y").date()
+    except ValueError:
+        pass
+
     return None
 
 
