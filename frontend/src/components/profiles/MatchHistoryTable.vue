@@ -37,6 +37,25 @@ function toggle(i) {
   expandedIndex.value = expandedIndex.value === i ? null : i
 }
 
+function detailList(m) {
+  if (m.details?.length) return m.details
+  const out = []
+  if (m.map) out.push({ label: 'Карта', value: m.map })
+  if (m.score) out.push({ label: 'Счёт', value: m.score })
+  if (m.kd != null) out.push({ label: 'K/D', value: m.kd })
+  if (m.kills != null) out.push({ label: 'Kills', value: m.kills })
+  if (m.deaths != null) out.push({ label: 'Deaths', value: m.deaths })
+  if (m.assists != null) out.push({ label: 'Assists', value: m.assists })
+  if (m.hs_percent != null) out.push({ label: 'HS %', value: m.hs_percent })
+  if (m.headshots != null) out.push({ label: 'HS', value: m.headshots })
+  if (m.mvps != null) out.push({ label: 'MVP', value: m.mvps })
+  if (m.elo_change != null) {
+    const s = m.elo_change > 0 ? '+' : ''
+    out.push({ label: 'ELO', value: `${s}${m.elo_change}` })
+  }
+  return out
+}
+
 function openParticipants(m) {
   if (!m.match_id) return
   emit('open-match', m.match_id)
@@ -151,7 +170,7 @@ function extractHint(m) {
         </span>
         <div class="match-main">
           <div class="match-top">
-            <span class="match-title">{{ m.title }}</span>
+            <span class="match-title">{{ m.title || m.map || 'Faceit' }}</span>
             <span class="match-subtitle">{{ m.subtitle }}</span>
           </div>
         </div>
@@ -163,7 +182,15 @@ function extractHint(m) {
               :class="m.verdict.tone"
             >{{ m.verdict.label }}</span>
             <span class="solo-badge" v-if="m.solo">Соло</span>
+            <span
+              v-if="m.elo_change != null"
+              class="elo-badge"
+              :class="m.elo_change >= 0 ? 'up' : 'down'"
+            >
+              {{ m.elo_change > 0 ? '+' : '' }}{{ m.elo_change }} ELO
+            </span>
           </div>
+          <span v-if="m.score" class="match-score">{{ m.score }}</span>
           <span v-if="m.played_at">{{ m.played_at }}</span>
           <span v-if="m.duration">{{ m.duration }}</span>
         </div>
@@ -174,8 +201,8 @@ function extractHint(m) {
         <div class="match-details-expanded" v-if="expandedIndex === i">
           <div
             class="detail-item"
-            v-for="d in (m.details || [])"
-            :key="d.label"
+            v-for="(d, di) in detailList(m)"
+            :key="d.label + di"
           >
             <span class="detail-label">{{ d.label }}</span>
             <span class="detail-value">{{ d.value }}</span>
@@ -460,6 +487,27 @@ function extractHint(m) {
   border-radius: 3px;
   background: var(--bg-card-hover);
   color: var(--text-muted);
+}
+
+.elo-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.elo-badge.up {
+  background: rgba(106, 170, 124, 0.18);
+  color: var(--success);
+}
+.elo-badge.down {
+  background: rgba(201, 122, 114, 0.18);
+  color: var(--danger);
+}
+.match-score {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
 }
 
 .show-more-btn {
