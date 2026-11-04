@@ -8,8 +8,8 @@ const props = defineProps({
   matches: { type: Array, default: () => [] },
   initialLimit: { type: Number, default: 8 },
   canOpenParticipants: { type: Boolean, default: true },
-  /** показывать кнопку AI-разбора (только свой профиль доты) */
   enableAnalysis: { type: Boolean, default: false },
+  platform: { type: String, default: '' },
 })
 const emit = defineEmits(['open-match'])
 
