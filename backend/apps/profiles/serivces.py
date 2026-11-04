@@ -1462,18 +1462,57 @@ class ProfileSyncService:
                 details.insert(0, {"label": "ELO", "value": f"{sign}{elo_change}"})
                 elo_sub = f" · {sign}{elo_change} ELO"
 
+            k_i = _to_int(kills)
+            d_i = _to_int(deaths)
+            a_i = _to_int(assists)
+            hs_i = _to_int(hs_m) if hs_m is not None else None
+            hs_pct = _to_float(hs_m)
+
+            kd_f = _to_float(kd_m)
+            if kd_f is None and d_i:
+                kd_f = round(k_i / d_i, 2)
+            elif kd_f is not None:
+                kd_f = round(kd_f, 2)
+
+            details = [
+                {"label": "Карта", "value": map_name or "—"},
+                {"label": "Счёт", "value": score or "—"},
+                {"label": "K/D", "value": kd_f if kd_f is not None else (kd_m or "—")},
+                {"label": "HS %", "value": hs_pct if hs_pct is not None else (hs_m or "—")},
+                {"label": "Kills", "value": k_i},
+                {"label": "Deaths", "value": d_i},
+                {"label": "Assists", "value": a_i},
+            ]
+            if elo_change is not None:
+                sign = "+" if elo_change > 0 else ""
+                details.insert(0, {"label": "ELO", "value": f"{sign}{elo_change}"})
+
+            # MVP если есть в stats
+            mvps = _sget(stats, "MVPs", "MVP", "mvps")
+            mvps_i = _to_int(mvps) if mvps not in (None, "") else None
+            if mvps_i is not None:
+                details.append({"label": "MVP", "value": mvps_i})
+
             match_history.append({
                 "won": won,
-                "title": map_name,
-                "subtitle": f"{kills}/{deaths}/{assists}"
-                    + (f" · KD {kd_m}" if kd_m else "")
-                    + elo_sub,
+                "title": map_name or "Faceit",
+                "subtitle": f"{k_i}/{d_i}/{a_i}",  # без · — проще для extractHint
                 "duration": None,
                 "match_id": match_id,
                 "played_at": played_at,
                 "verdict": verdict,
                 "elo_change": elo_change,
                 "solo": None,
+                # для AI / фронта
+                "map": map_name,
+                "kills": k_i,
+                "deaths": d_i,
+                "assists": a_i,
+                "kd": kd_f,
+                "headshots": hs_i,
+                "hs_percent": hs_pct,
+                "mvps": mvps_i,
+                "score": score,
                 "details": details,
             })
 
