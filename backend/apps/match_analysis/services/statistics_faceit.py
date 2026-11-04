@@ -59,7 +59,7 @@ def summarize_faceit_recent(recent: list) -> dict:
         "avg_kd": avg([_kd(k, d) for k, d in zip(kills_l, deaths_l)]) if kills_l else None,
     }
 
-def build_faceit_snapshots(ctx: dict) -> dict:
+def build_faceit_snapshot(ctx: dict) -> dict:
     m = dict(ctx.get("match") or {})
     recent = ctx.get("recent") or []
     r20 = summarize_faceit_recent(recent)
