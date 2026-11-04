@@ -83,31 +83,49 @@ function extractHint(m) {
   const fromDetails = {}
   for (const d of m.details || []) {
     const label = String(d.label || '').toLowerCase()
-    const num = Number(String(d.value ?? '').replace(',', '').trim())
-    if (Number.isNaN(num)) continue
-    if (label.includes('gpm')) fromDetails.gpm = num
-    if (label.includes('xpm')) fromDetails.xpm = num
-    if (label.includes('last') || label === 'cs') fromDetails.last_hits = num
+    const raw = String(d.value ?? '').replace('%', '').replace(',', '.').trim()
+    const num = Number(raw)
+
+    if (!Number.isNaN(num)) {
+      if (label.includes('mvp')) fromDetails.mvps = num
+      if (label.includes('hs') || label.includes('head')) fromDetails.headshots = num
+      if (label === 'k/d' || label === 'kd') fromDetails.kd = num
+      if (label.includes('gpm')) fromDetails.gpm = num
+      if (label.includes('xpm')) fromDetails.xpm = num
+      if (label.includes('last') || label === 'cs') fromDetails.last_hits = num
+    }
+    if (label.includes('map') || label.includes('карта')) fromDetails.map = String(d.value)
   }
 
   let kills = m.kills
   let deaths = m.deaths
   let assists = m.assists
-  if (kills == null && m.subtitle) {
-    const parts = String(m.subtitle).split('/').map((x) => Number(x.trim()))
+
+  // Faceit: "26/22/6 · de_nuke" | Dota: "12/5/20"
+  const kdaSrc = String(m.kda || m.subtitle || '').split('·')[0].trim()
+  if (kills == null && kdaSrc.includes('/')) {
+    const parts = kdaSrc.split('/').map((x) => Number(String(x).trim()))
     if (parts.length >= 3 && parts.every((n) => !Number.isNaN(n))) {
       ;[kills, deaths, assists] = parts
     }
   }
 
   return {
+    // общие
     kills: kills ?? null,
     deaths: deaths ?? null,
     assists: assists ?? null,
+    kda: kills != null ? `${kills}/${deaths}/${assists}` : null,
+    won: typeof m.won === 'boolean' ? m.won : null,
+    // faceit
+    kd: m.kd ?? fromDetails.kd ?? null,
+    headshots: m.headshots ?? fromDetails.headshots ?? null,
+    mvps: m.mvps ?? fromDetails.mvps ?? null,
+    map: m.map || fromDetails.map || null,
+    // dota
     gpm: m.gpm ?? fromDetails.gpm ?? null,
     xpm: m.xpm ?? fromDetails.xpm ?? null,
     last_hits: m.last_hits ?? fromDetails.last_hits ?? null,
-    won: typeof m.won === 'boolean' ? m.won : null,
   }
 }
 </script>
