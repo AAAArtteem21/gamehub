@@ -165,9 +165,21 @@ onMounted(load)
           <span class="match-meta valorant-meta" v-if="isFaceit">
             <span class="v-map">Faceit · {{ matchData.map || 'Карта' }}</span>
             <span class="v-score-line">
-              <span class="v-score red">{{ matchData.faction1_score ?? '—' }}</span>
+              <span
+                class="v-score red"
+                :class="{ winner: matchData.winner === 'faction1' }"
+              >{{ matchData.faction1_score ?? '—' }}</span>
               <span class="v-score-div">:</span>
-              <span class="v-score blue">{{ matchData.faction2_score ?? '—' }}</span>
+              <span
+                class="v-score blue"
+                :class="{ winner: matchData.winner === 'faction2' }"
+              >{{ matchData.faction2_score ?? '—' }}</span>
+            </span>
+            <span class="v-winner-tag" v-if="matchData.winner === 'faction1'">
+              Победа {{ matchData.faction1_name || 'Team 1' }}
+            </span>
+            <span class="v-winner-tag" v-else-if="matchData.winner === 'faction2'">
+              Победа {{ matchData.faction2_name || 'Team 2' }}
             </span>
             <span class="v-winner-tag" v-if="matchData.competition">{{ matchData.competition }}</span>
           </span>
@@ -188,7 +200,6 @@ onMounted(load)
 
       <!-- VALORANT -->
       <template v-else-if="isValorant">
-        <!-- ... без изменений: redTeam / blueTeam / rounds ... -->
         <div class="v-teams">
           <div class="v-team red-side">
             <div class="v-team-header"><span>Red</span><span>{{ matchData.red_score ?? 0 }}</span></div>
@@ -296,20 +307,27 @@ onMounted(load)
             <div
               v-for="p in faceitTeam1"
               :key="p.player_id || p.nickname || p.display_name"
-              class="v-player-card"
-              :class="{ clickable: canOpenProfile(p) }"
+              class="v-player-card faceit-card"
+              :class="{
+                clickable: canOpenProfile(p),
+                winner: matchData.winner === 'faction1',
+              }"
               @click="goToPlayer(p)"
             >
               <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
               <div v-else class="v-player-avatar placeholder">
-                {{ (p.display_name || '?')[0]?.toUpperCase() }}
+                {{ (p.display_name || p.nickname || '?')[0]?.toUpperCase() }}
               </div>
               <div class="v-player-info">
                 <div class="v-player-top">
-                  <span class="v-player-name">{{ p.display_name }}</span>
+                  <span class="v-player-name">{{ p.display_name || p.nickname }}</span>
                   <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
                 </div>
                 <div class="v-player-kda">{{ p.kda }}</div>
+                <div class="faceit-stats">
+                  <span v-if="p.headshots != null"><b>{{ p.headshots }}</b> HS</span>
+                  <span v-if="p.mvps != null"><b>{{ p.mvps }}</b> MVP</span>
+                </div>
               </div>
             </div>
           </div>
@@ -321,20 +339,27 @@ onMounted(load)
             <div
               v-for="p in faceitTeam2"
               :key="p.player_id || p.nickname || p.display_name"
-              class="v-player-card"
-              :class="{ clickable: canOpenProfile(p) }"
+              class="v-player-card faceit-card"
+              :class="{
+                clickable: canOpenProfile(p),
+                winner: matchData.winner === 'faction2',
+              }"
               @click="goToPlayer(p)"
             >
               <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
               <div v-else class="v-player-avatar placeholder">
-                {{ (p.display_name || '?')[0]?.toUpperCase() }}
+                {{ (p.display_name || p.nickname || '?')[0]?.toUpperCase() }}
               </div>
               <div class="v-player-info">
                 <div class="v-player-top">
-                  <span class="v-player-name">{{ p.display_name }}</span>
+                  <span class="v-player-name">{{ p.display_name || p.nickname }}</span>
                   <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
                 </div>
                 <div class="v-player-kda">{{ p.kda }}</div>
+                <div class="faceit-stats">
+                  <span v-if="p.headshots != null"><b>{{ p.headshots }}</b> HS</span>
+                  <span v-if="p.mvps != null"><b>{{ p.mvps }}</b> MVP</span>
+                </div>
               </div>
             </div>
           </div>
@@ -377,7 +402,6 @@ onMounted(load)
             </div>
             <div v-if="!deadlockTeam0.length" class="state" style="padding: 16px 0">Нет игроков</div>
           </div>
-
           <div class="v-team blue-side">
             <div class="v-team-header">
               <span>Команда 2</span>
@@ -416,7 +440,6 @@ onMounted(load)
 
       <!-- DOTA -->
       <div v-else class="dota-layout">
-        <!-- оставь свой dota-блок как был — radiantPlayers / direPlayers -->
         <div class="dota-team">
           <div class="dota-team-header radiant">Radiant</div>
           <div
@@ -722,6 +745,9 @@ onMounted(load)
 .v-player-card.clickable:hover {
   border-color: var(--accent);
 }
+.v-player-card.winner {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border-color));
+}
 .v-player-avatar {
   width: 40px;
   height: 40px;
@@ -761,6 +787,18 @@ onMounted(load)
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+.faceit-stats {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+}
+.faceit-stats b {
+  color: var(--text-primary);
+  font-weight: 700;
 }
 
 .rounds-title {
