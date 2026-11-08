@@ -49,6 +49,50 @@ const deadlockTeam1 = computed(() =>
   participants.value.filter((p) => Number(p.team) === 1)
 )
 
+function parseKda(p) {
+  const s = String(p?.kda || '')
+  const parts = s.split('/').map((x) => Number(String(x).trim()))
+  if (parts.length >= 3 && parts.every((n) => !Number.isNaN(n))) {
+    return { k: parts[0], d: parts[1], a: parts[2] }
+  }
+  return {
+    k: p?.kills ?? null,
+    d: p?.deaths ?? null,
+    a: p?.assists ?? null,
+  }
+}
+
+function faceitKills(p) {
+  const { k } = parseKda(p)
+  return k ?? '—'
+}
+function faceitDeaths(p) {
+  const { d } = parseKda(p)
+  return d ?? '—'
+}
+function faceitAssists(p) {
+  const { a } = parseKda(p)
+  return a ?? '—'
+}
+function faceitKd(p) {
+  if (p?.kd != null && p.kd !== '') return p.kd
+  const { k, d } = parseKda(p)
+  if (k == null || d == null) return '—'
+  return (k / Math.max(d, 1)).toFixed(2)
+}
+
+function sortFaceit(list) {
+  return [...list].sort((a, b) => {
+    const ka = Number(parseKda(a).k) || 0
+    const kb = Number(parseKda(b).k) || 0
+    if (kb !== ka) return kb - ka
+    return (Number(b.mvps) || 0) - (Number(a.mvps) || 0)
+  })
+}
+
+const sortedFaceitTeam1 = computed(() => sortFaceit(faceitTeam1.value))
+const sortedFaceitTeam2 = computed(() => sortFaceit(faceitTeam2.value))
+
 function canOpenProfile(p) {
   if (!p) return false
   if (p.is_gamehub_user && p.gamehub_user_id) return true
@@ -298,68 +342,89 @@ onMounted(load)
 
       <!-- FACEIT -->
       <template v-else-if="isFaceit">
-        <div class="v-teams">
+        <div class="v-teams faceit-teams">
           <div class="v-team red-side">
             <div class="v-team-header">
               <span>{{ matchData.faction1_name || 'Team 1' }}</span>
-              <span>{{ matchData.faction1_score ?? '' }}</span>
+              <span class="team-score">{{ matchData.faction1_score ?? '' }}</span>
             </div>
             <div
-              v-for="p in faceitTeam1"
+              v-for="p in sortedFaceitTeam1"
               :key="p.player_id || p.nickname || p.display_name"
-              class="v-player-card faceit-card"
+              class="faceit-player-card"
               :class="{
                 clickable: canOpenProfile(p),
                 winner: matchData.winner === 'faction1',
               }"
               @click="goToPlayer(p)"
             >
-              <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
-              <div v-else class="v-player-avatar placeholder">
-                {{ (p.display_name || p.nickname || '?')[0]?.toUpperCase() }}
+              <div class="fp-top">
+                <img v-if="p.avatar" :src="p.avatar" class="fp-avatar" alt="" />
+                <div v-else class="fp-avatar placeholder">
+                  {{ (p.display_name || p.nickname || '?')[0]?.toUpperCase() }}
+                </div>
+                <div class="fp-title">
+                  <div class="fp-name-row">
+                    <span class="fp-name">{{ p.display_name || p.nickname }}</span>
+                    <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
+                    <span class="mvp-pill" v-if="Number(p.mvps) > 0">{{ p.mvps }} MVP</span>
+                  </div>
+                  <div class="fp-kda">{{ p.kda || '—' }}</div>
+                </div>
               </div>
-              <div class="v-player-info">
-                <div class="v-player-top">
-                  <span class="v-player-name">{{ p.display_name || p.nickname }}</span>
-                  <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
-                </div>
-                <div class="v-player-kda">{{ p.kda }}</div>
-                <div class="faceit-stats">
-                  <span v-if="p.headshots != null"><b>{{ p.headshots }}</b> HS</span>
-                  <span v-if="p.mvps != null"><b>{{ p.mvps }}</b> MVP</span>
-                </div>
+              <div class="fp-stats">
+                <div class="fps"><span>K</span><b>{{ faceitKills(p) }}</b></div>
+                <div class="fps"><span>D</span><b>{{ faceitDeaths(p) }}</b></div>
+                <div class="fps"><span>A</span><b>{{ faceitAssists(p) }}</b></div>
+                <div class="fps"><span>K/D</span><b>{{ faceitKd(p) }}</b></div>
+                <div class="fps"><span>HS</span><b>{{ p.headshots ?? '—' }}</b></div>
+                <div class="fps"><span>MVP</span><b>{{ p.mvps ?? '—' }}</b></div>
+                <div class="fps" v-if="p.adr != null"><span>ADR</span><b>{{ p.adr }}</b></div>
+                <div class="fps" v-if="p.kr != null"><span>K/R</span><b>{{ p.kr }}</b></div>
+                <div class="fps" v-if="p.hs_percent != null"><span>HS%</span><b>{{ p.hs_percent }}</b></div>
               </div>
             </div>
           </div>
+
           <div class="v-team blue-side">
             <div class="v-team-header">
               <span>{{ matchData.faction2_name || 'Team 2' }}</span>
-              <span>{{ matchData.faction2_score ?? '' }}</span>
+              <span class="team-score">{{ matchData.faction2_score ?? '' }}</span>
             </div>
             <div
-              v-for="p in faceitTeam2"
+              v-for="p in sortedFaceitTeam2"
               :key="p.player_id || p.nickname || p.display_name"
-              class="v-player-card faceit-card"
+              class="faceit-player-card"
               :class="{
                 clickable: canOpenProfile(p),
                 winner: matchData.winner === 'faction2',
               }"
               @click="goToPlayer(p)"
             >
-              <img v-if="p.avatar" :src="p.avatar" class="v-player-avatar" alt="" />
-              <div v-else class="v-player-avatar placeholder">
-                {{ (p.display_name || p.nickname || '?')[0]?.toUpperCase() }}
+              <div class="fp-top">
+                <img v-if="p.avatar" :src="p.avatar" class="fp-avatar" alt="" />
+                <div v-else class="fp-avatar placeholder">
+                  {{ (p.display_name || p.nickname || '?')[0]?.toUpperCase() }}
+                </div>
+                <div class="fp-title">
+                  <div class="fp-name-row">
+                    <span class="fp-name">{{ p.display_name || p.nickname }}</span>
+                    <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
+                    <span class="mvp-pill" v-if="Number(p.mvps) > 0">{{ p.mvps }} MVP</span>
+                  </div>
+                  <div class="fp-kda">{{ p.kda || '—' }}</div>
+                </div>
               </div>
-              <div class="v-player-info">
-                <div class="v-player-top">
-                  <span class="v-player-name">{{ p.display_name || p.nickname }}</span>
-                  <span class="gamehub-badge" v-if="p.is_gamehub_user">на GameHub</span>
-                </div>
-                <div class="v-player-kda">{{ p.kda }}</div>
-                <div class="faceit-stats">
-                  <span v-if="p.headshots != null"><b>{{ p.headshots }}</b> HS</span>
-                  <span v-if="p.mvps != null"><b>{{ p.mvps }}</b> MVP</span>
-                </div>
+              <div class="fp-stats">
+                <div class="fps"><span>K</span><b>{{ faceitKills(p) }}</b></div>
+                <div class="fps"><span>D</span><b>{{ faceitDeaths(p) }}</b></div>
+                <div class="fps"><span>A</span><b>{{ faceitAssists(p) }}</b></div>
+                <div class="fps"><span>K/D</span><b>{{ faceitKd(p) }}</b></div>
+                <div class="fps"><span>HS</span><b>{{ p.headshots ?? '—' }}</b></div>
+                <div class="fps"><span>MVP</span><b>{{ p.mvps ?? '—' }}</b></div>
+                <div class="fps" v-if="p.adr != null"><span>ADR</span><b>{{ p.adr }}</b></div>
+                <div class="fps" v-if="p.kr != null"><span>K/R</span><b>{{ p.kr }}</b></div>
+                <div class="fps" v-if="p.hs_percent != null"><span>HS%</span><b>{{ p.hs_percent }}</b></div>
               </div>
             </div>
           </div>
@@ -788,17 +853,111 @@ onMounted(load)
   gap: 2px;
   min-width: 0;
 }
-.faceit-stats {
-  display: flex;
-  gap: 10px;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono, monospace);
+
+/* Faceit rich cards */
+.faceit-teams {
+  gap: 16px;
 }
-.faceit-stats b {
-  color: var(--text-primary);
+.team-score {
+  font-family: monospace;
+  font-size: 15px;
+}
+.faceit-player-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.faceit-player-card.clickable {
+  cursor: pointer;
+}
+.faceit-player-card.clickable:hover {
+  border-color: var(--accent);
+}
+.faceit-player-card.winner {
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border-color));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 20%, transparent);
+}
+.fp-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.fp-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--bg-card-hover);
+  flex-shrink: 0;
+}
+.fp-avatar.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+.fp-title {
+  min-width: 0;
+  flex: 1;
+}
+.fp-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.fp-name {
   font-weight: 700;
+  font-size: 13px;
+}
+.fp-kda {
+  margin-top: 2px;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+.mvp-pill {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+}
+.fp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+@media (min-width: 500px) {
+  .fp-stats {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+.fps {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+.fps span {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fps b {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 1px;
+  font-family: var(--font-mono, monospace);
 }
 
 .rounds-title {
