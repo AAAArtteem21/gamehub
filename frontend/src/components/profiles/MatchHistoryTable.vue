@@ -37,25 +37,6 @@ function toggle(i) {
   expandedIndex.value = expandedIndex.value === i ? null : i
 }
 
-function detailList(m) {
-  if (m.details?.length) return m.details
-  const out = []
-  if (m.map) out.push({ label: 'Карта', value: m.map })
-  if (m.score) out.push({ label: 'Счёт', value: m.score })
-  if (m.kd != null) out.push({ label: 'K/D', value: m.kd })
-  if (m.kills != null) out.push({ label: 'Kills', value: m.kills })
-  if (m.deaths != null) out.push({ label: 'Deaths', value: m.deaths })
-  if (m.assists != null) out.push({ label: 'Assists', value: m.assists })
-  if (m.hs_percent != null) out.push({ label: 'HS %', value: m.hs_percent })
-  if (m.headshots != null) out.push({ label: 'HS', value: m.headshots })
-  if (m.mvps != null) out.push({ label: 'MVP', value: m.mvps })
-  if (m.elo_change != null) {
-    const s = m.elo_change > 0 ? '+' : ''
-    out.push({ label: 'ELO', value: `${s}${m.elo_change}` })
-  }
-  return out
-}
-
 function openParticipants(m) {
   if (!m.match_id) return
   emit('open-match', m.match_id)
@@ -63,6 +44,36 @@ function openParticipants(m) {
 
 function showMore() {
   limit.value = Math.min(limit.value + 10, (props.matches || []).length)
+}
+
+function detailList(m) {
+  if (m.details?.length) return m.details
+  const out = []
+  const add = (label, value) => {
+    if (value == null || value === '') return
+    out.push({ label, value })
+  }
+  add('Карта', m.map)
+  add('Счёт', m.score)
+  add('K/D', m.kd)
+  add('K/R', m.kr)
+  add('ADR', m.adr)
+  add('HS %', m.hs_percent)
+  add('MVP', m.mvps)
+  add('Kills', m.kills)
+  add('Deaths', m.deaths)
+  add('Assists', m.assists)
+  if (m.elo_change != null) {
+    const s = m.elo_change > 0 ? '+' : ''
+    add('ELO', `${s}${m.elo_change}`)
+  }
+  if (m.triple_kills || m.quadro_kills || m.penta_kills) {
+    add(
+      'Multi',
+      `${m.triple_kills || 0}T / ${m.quadro_kills || 0}Q / ${m.penta_kills || 0}P`
+    )
+  }
+  return out
 }
 
 async function analyzeMatch(m) {
@@ -73,14 +84,16 @@ async function analyzeMatch(m) {
   analyzeError.value = null
   try {
     const hint = extractHint(m)
-    const platform = String(
-      m.platform || props.platform || ''
-    ).toLowerCase()
+    const platform = String(m.platform || props.platform || '').toLowerCase()
+    const id = String(m.match_id || '')
+    const isFaceit =
+      platform === 'faceit' ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+      /^1-[0-9a-f-]{20,}$/i.test(id)
 
-    const res =
-      platform === 'faceit'
-        ? await analysisApi.createFaceit(m.match_id, hint)
-        : await analysisApi.createDota(m.match_id, hint)
+    const res = isFaceit
+      ? await analysisApi.createFaceit(m.match_id, hint)
+      : await analysisApi.createDota(m.match_id, hint)
 
     const data = res.data
     if (data.status === 'failed') {
@@ -112,6 +125,8 @@ function extractHint(m) {
       if (label.includes('gpm')) fromDetails.gpm = num
       if (label.includes('xpm')) fromDetails.xpm = num
       if (label.includes('last') || label === 'cs') fromDetails.last_hits = num
+      if (label === 'adr') fromDetails.adr = num
+      if (label === 'k/r' || label === 'kr') fromDetails.kr = num
     }
     if (label.includes('map') || label.includes('карта')) fromDetails.map = String(d.value)
   }
@@ -120,7 +135,6 @@ function extractHint(m) {
   let deaths = m.deaths
   let assists = m.assists
 
-  // Faceit: "26/22/6 · de_nuke" | Dota: "12/5/20"
   const kdaSrc = String(m.kda || m.subtitle || '').split('·')[0].trim()
   if (kills == null && kdaSrc.includes('/')) {
     const parts = kdaSrc.split('/').map((x) => Number(String(x).trim()))
@@ -130,18 +144,17 @@ function extractHint(m) {
   }
 
   return {
-    // общие
     kills: kills ?? null,
     deaths: deaths ?? null,
     assists: assists ?? null,
     kda: kills != null ? `${kills}/${deaths}/${assists}` : null,
     won: typeof m.won === 'boolean' ? m.won : null,
-    // faceit
     kd: m.kd ?? fromDetails.kd ?? null,
     headshots: m.headshots ?? fromDetails.headshots ?? null,
     mvps: m.mvps ?? fromDetails.mvps ?? null,
     map: m.map || fromDetails.map || null,
-    // dota
+    adr: m.adr ?? fromDetails.adr ?? null,
+    kr: m.kr ?? fromDetails.kr ?? null,
     gpm: m.gpm ?? fromDetails.gpm ?? null,
     xpm: m.xpm ?? fromDetails.xpm ?? null,
     last_hits: m.last_hits ?? fromDetails.last_hits ?? null,
@@ -170,8 +183,9 @@ function extractHint(m) {
         </span>
         <div class="match-main">
           <div class="match-top">
-            <span class="match-title">{{ m.title || m.map || 'Faceit' }}</span>
+            <span class="match-title">{{ m.title || m.map || 'Матч' }}</span>
             <span class="match-subtitle">{{ m.subtitle }}</span>
+            <span v-if="m.kd != null" class="match-kd">KD {{ m.kd }}</span>
           </div>
         </div>
         <div class="match-right">
@@ -187,10 +201,11 @@ function extractHint(m) {
               class="elo-badge"
               :class="m.elo_change >= 0 ? 'up' : 'down'"
             >
-              {{ m.elo_change > 0 ? '+' : '' }}{{ m.elo_change }} ELO
+              {{ m.elo_change > 0 ? '+' : '' }}{{ m.elo_change }}
             </span>
           </div>
           <span v-if="m.score" class="match-score">{{ m.score }}</span>
+          <span v-if="m.adr != null" class="match-mini">ADR {{ m.adr }}</span>
           <span v-if="m.played_at">{{ m.played_at }}</span>
           <span v-if="m.duration">{{ m.duration }}</span>
         </div>
@@ -201,8 +216,8 @@ function extractHint(m) {
         <div class="match-details-expanded" v-if="expandedIndex === i">
           <div
             class="detail-item"
-            v-for="(d, di) in detailList(m)"
-            :key="d.label + di"
+            v-for="d in detailList(m)"
+            :key="d.label"
           >
             <span class="detail-label">{{ d.label }}</span>
             <span class="detail-value">{{ d.value }}</span>
@@ -343,6 +358,11 @@ function extractHint(m) {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+.match-kd {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
 
 .match-right {
   display: flex;
@@ -354,6 +374,15 @@ function extractHint(m) {
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+.match-score {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.match-mini {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .expand-arrow {
@@ -488,7 +517,6 @@ function extractHint(m) {
   background: var(--bg-card-hover);
   color: var(--text-muted);
 }
-
 .elo-badge {
   font-size: 9px;
   font-weight: 700;
@@ -502,12 +530,6 @@ function extractHint(m) {
 .elo-badge.down {
   background: rgba(201, 122, 114, 0.18);
   color: var(--danger);
-}
-.match-score {
-  font-size: 12px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
 }
 
 .show-more-btn {
