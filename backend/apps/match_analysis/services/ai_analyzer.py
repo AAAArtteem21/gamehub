@@ -161,81 +161,219 @@ def _heuristic_report(snapshot: dict) -> dict:
     }
 
 def _heuristic_faceit(snapshot: dict) -> dict:
-    m = snapshot.get("match") or {}
-    d = snapshot.get("deltas") or {}
-    r20 = snapshot.get("recent_20") or {}
-    won = m.get("won")
+    match = snapshot.get("match") or {}
+    recent = snapshot.get("recent_20") or {}
+    deltas = snapshot.get("deltas") or {}
 
-    strengths, weaknesses, recs = [], [], []
+    won = match.get("won")
+    kills = match.get("kills")
+    deaths = match.get("deaths")
+    assists = match.get("assists")
+    kd = match.get("kd")
+    hs = match.get("headshots") or match.get("hs_percent")
+    mvps = match.get("mvps")
+    map_name = match.get("map") or ""
+    score = match.get("score") or ""
 
-    def add_s(t, detail, ev):
-        strengths.append({"title": t, "detail": detail, "evidence": str(ev)})
+    try:
+        kd = float(kd) if kd is not None else None
+    except (TypeError, ValueError):
+        kd = None
+    if kd is None and kills is not None and deaths is not None:
+        try:
+            kd = float(kills) / max(float(deaths), 1.0)
+        except (TypeError, ValueError):
+            kd = None
 
-    def add_w(t, detail, ev):
-        weaknesses.append({"title": t, "detail": detail, "evidence": str(ev)})
+    avg_kd = recent.get("avg_kd")
+    avg_kills = recent.get("avg_kills")
+    avg_deaths = recent.get("avg_deaths")
+    winrate = recent.get("winrate")
 
-    def add_r(pri, action, why):
-        recs.append({"priority": pri, "action": action, "why": why})
+    kd_vs = deltas.get("kd_vs_avg")
+    kills_vs = deltas.get("kills_vs_avg")
+    deaths_vs = deltas.get("deaths_vs_avg")
 
-    kd_d = d.get("kd_vs_avg")
-    if kd_d is not None:
-        if kd_d >= 0.2:
-            add_s("K/D выше формы", "Лучше обычного K/D.", f"KD {m.get('kd')} vs {r20.get('avg_kd')}")
-        elif kd_d <= -0.2:
-            add_w("K/D ниже формы", "Хуже обычного K/D.", f"KD {m.get('kd')} vs {r20.get('avg_kd')}")
-            add_r(1, "Меньше пиков 1в1 без инфы", "K/D просел")
-
-    if d.get("deaths_vs_avg") is not None and d["deaths_vs_avg"] >= 3:
-        add_w("Много смертей", "Смертей больше обычного.", f"deaths={m.get('deaths')}")
-
-    hs = m.get("hs_percent")
-    if hs is not None and hs >= 50:
-        add_s("Высокий HS%", "Меткость по головам выше средней.", f"HS%={hs}")
-    elif hs is not None and hs < 25 and (m.get("kills") or 0) >= 10:
-        add_w("Низкий HS%", "Мало хедшотов при заметных киллах.", f"HS%={hs}")
-
-    mvps = m.get("mvps")
-    if mvps is not None and mvps >= 4:
-        add_s("Много MVP", "Сильное влияние на раунды.", f"MVP={mvps}")
+    strengths = []
+    weaknesses = []
+    recs = []
 
     if won is True:
-        add_s("Победа", f"Карта {m.get('map') or '—'} · {m.get('score') or ''}".strip(), "won=true")
+        strengths.append({
+            "title": "Победа",
+            "detail": f"Карта {map_name} · {score}".strip(" ·"),
+            "evidence": f"won=true score={score}",
+        })
+    if kd is not None and kd >= 1.25:
+        strengths.append({
+            "title": "Сильный K/D",
+            "detail": f"K/D {kd:.2f}" + (f" (ср. {avg_kd})" if avg_kd else ""),
+            "evidence": f"kd={kd}",
+        })
+    if kills is not None and avg_kills and kills >= avg_kills + 3:
+        strengths.append({
+            "title": "Выше среднего по киллам",
+            "detail": f"{kills} kills vs ср. {avg_kills}",
+            "evidence": f"kills={kills} avg={avg_kills}",
+        })
+    if mvps is not None and int(mvps) >= 3:
+        strengths.append({
+            "title": "Много MVP",
+            "detail": f"{mvps} MVP в матче",
+            "evidence": f"mvps={mvps}",
+        })
+    if hs is not None:
+        try:
+            hs_n = float(hs)
+            if hs_n >= 40 and (kills is None or hs_n <= 100):
+                strengths.append({
+                    "title": "Хороший HS",
+                    "detail": f"HS {hs}",
+                    "evidence": f"hs={hs}",
+                })
+        except (TypeError, ValueError):
+            pass
+
+    if won is False:
+        weaknesses.append({
+            "title": "Поражение",
+            "detail": f"Карта {map_name} · {score}".strip(" ·"),
+            "evidence": f"won=false",
+        })
+    if kd is not None and kd < 0.85:
+        weaknesses.append({
+            "title": "Низкий K/D",
+            "detail": f"K/D {kd:.2f}" + (f", форма {avg_kd}" if avg_kd else ""),
+            "evidence": f"kd={kd}",
+        })
+    if deaths is not None and avg_deaths and deaths >= avg_deaths + 3:
+        weaknesses.append({
+            "title": "Много смертей",
+            "detail": f"{deaths} deaths vs ср. {avg_deaths}",
+            "evidence": f"deaths={deaths}",
+        })
+    if deaths is not None and kills is not None and deaths > kills + 5:
+        weaknesses.append({
+            "title": "Смерти сильно выше киллов",
+            "detail": f"{kills}/{deaths}",
+            "evidence": f"k={kills} d={deaths}",
+        })
+    if kd_vs is not None and kd_vs < -0.25:
+        weaknesses.append({
+            "title": "Ниже своей формы по K/D",
+            "detail": f"Δ K/D {kd_vs:+.2f}",
+            "evidence": f"kd_vs_avg={kd_vs}",
+        })
+    if kills_vs is not None and kills_vs < -3:
+        weaknesses.append({
+            "title": "Меньше киллов, чем обычно",
+            "detail": f"Δ kills {kills_vs:+.1f}",
+            "evidence": f"kills_vs_avg={kills_vs}",
+        })
+
+    if not strengths and won is None:
+        strengths.append({
+            "title": "Матч разобран",
+            "detail": f"K/D {kd or '—'} · {map_name}",
+            "evidence": "fallback",
+        })
+    if not weaknesses:
+        if kd is not None and 0.85 <= kd < 1.1:
+            weaknesses.append({
+                "title": "Средний K/D",
+                "detail": "Есть запас до стабильного плюса",
+                "evidence": f"kd={kd}",
+            })
+        else:
+            weaknesses.append({
+                "title": "Пока ровно",
+                "detail": "Нет явного провала по доступным цифрам",
+                "evidence": "none",
+            })
+
+    score_n = 50
+    if won is True:
+        score_n += 12
     elif won is False:
-        add_w("Поражение", f"Карта {m.get('map') or '—'} · {m.get('score') or ''}".strip(), "won=false")
+        score_n -= 12
+    if kd is not None:
+        if kd >= 1.4:
+            score_n += 18
+        elif kd >= 1.15:
+            score_n += 10
+        elif kd >= 1.0:
+            score_n += 4
+        elif kd < 0.7:
+            score_n -= 18
+        elif kd < 0.9:
+            score_n -= 10
+    if mvps is not None and int(mvps) >= 3:
+        score_n += 6
+    if deaths_vs is not None and deaths_vs > 3:
+        score_n -= 8
+    score_n = max(5, min(95, score_n))
 
-    if not strengths and not weaknesses:
-        add_w("Мало данных", "Недостаточно статистики.", "empty")
-
+    if deaths is not None and (avg_deaths is None or deaths >= (avg_deaths or 0)):
+        recs.append({
+            "priority": 1,
+            "action": "Срежь лишние смерти: играй ближе к команде в mid-round",
+            "why": "Deaths давят K/D и раунды",
+        })
+    if kd is not None and kd < 1.0:
+        recs.append({
+            "priority": 2,
+            "action": "Не форсируй пики 1vX — бери дуэли с инфой",
+            "why": f"K/D {kd:.2f} ниже комфортного",
+        })
+    if hs is not None:
+        try:
+            if float(hs) < 35 and (kills or 0) >= 10:
+                recs.append({
+                    "priority": 3,
+                    "action": "DM на headshot-only 10–15 мин перед сессией",
+                    "why": "HS% можно поднять",
+                })
+        except (TypeError, ValueError):
+            pass
     if not recs:
-        add_r(1, "Сравни K/D и смерти со средней формой в следующих 5 катках", "Стабильность")
+        recs.append({
+            "priority": 1,
+            "action": "Сравни K/D и смерти со средней формой в следующих 5 катках",
+            "why": "Нужна стабильность",
+        })
 
-    score = 50
-    if won is True:
-        score += 12
+    if won is True and kd and kd >= 1.1:
+        headline = "Победа с плюсовым K/D"
+    elif won is True:
+        headline = "Победа, но форма средняя"
+    elif won is False and kd and kd >= 1.15:
+        headline = "Поражение при хорошей личной статистике"
     elif won is False:
-        score -= 12
-    if kd_d is not None:
-        score += 8 if kd_d > 0.2 else (-8 if kd_d < -0.2 else 0)
-    score = max(0, min(100, score))
-
-    if won and score >= 65:
-        headline = "Победа, выше своей формы"
-    elif won:
-        headline = "Победа"
-    elif won is False and score <= 45:
-        headline = "Поражение, ниже формы"
-    elif won is False:
-        headline = "Поражение"
+        headline = "Поражение, ниже формы" if (kd_vs or 0) < 0 else "Поражение"
     else:
-        headline = "Разбор Faceit"
+        headline = "Разбор матча Faceit"
+
+    one_liner = recs[0]["action"] if recs else "Смотри K/D и смерти vs форма"
 
     return {
         "headline": headline,
-        "score_0_100": score,
+        "one_liner": one_liner,
+        "score_0_100": score_n,
         "strengths": strengths[:5],
         "weaknesses": weaknesses[:5],
         "recommendations": recs[:4],
-        "one_liner": recs[0]["action"] if recs else "Смотри K/D относительно формы",
+        "match_stats": {
+            "kills": kills,
+            "deaths": deaths,
+            "assists": assists,
+            "kd": round(kd, 2) if kd is not None else None,
+            "headshots": match.get("headshots"),
+            "hs_percent": match.get("hs_percent"),
+            "mvps": mvps,
+            "map": map_name,
+            "score": score,
+            "won": won,
+        },
     }
 
 
