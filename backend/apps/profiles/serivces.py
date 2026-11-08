@@ -1209,6 +1209,7 @@ class ProfileSyncService:
 
 
     def _sync_faceit(self):
+        from datetime import datetime
         from .integrations.faceit_client import FaceitClient, FaceitError
 
         raw = (self.account.external_id or "").strip()
@@ -1334,7 +1335,9 @@ class ProfileSyncService:
                     m_wr = round(m_wins / m_matches * 100, 1) if m_matches else 0
                 else:
                     m_wr = round(m_wr, 1)
-                m_kd = _to_float(st.get("Average K/D Ratio") or st.get("K/D Ratio") or st.get("K/D"))
+                m_kd = _to_float(
+                    st.get("Average K/D Ratio") or st.get("K/D Ratio") or st.get("K/D")
+                )
                 if m_kd is not None:
                     m_kd = round(m_kd, 2)
                 map_rows.append({
@@ -1398,13 +1401,65 @@ class ProfileSyncService:
             map_name = (
                 _sget(stats, "Map", "map")
                 or item.get("map")
-                or (item.get("game_id") or game_id).upper()
+                or (item.get("game_id") or game_id)
             )
+            if isinstance(map_name, str) and map_name.lower() in ("cs2", "csgo"):
+                map_name = _sget(stats, "Map", "map") or map_name
+
             score = _sget(stats, "Score", "score")
             if not score and item.get("results"):
                 sc = (item.get("results") or {}).get("score") or {}
                 if sc:
-                    score = f"{sc.get('faction1', '?')} / {sc.get('faction2', '?')}"
+                    score = f"{sc.get('faction1', '?')}:{sc.get('faction2', '?')}"
+
+            k_i = _to_int(kills)
+            d_i = _to_int(deaths)
+            a_i = _to_int(assists)
+
+            hs_pct = _to_float(hs_m)
+            if hs_pct is not None:
+                hs_pct = round(hs_pct, 1)
+            hs_i = None
+            if hs_m is not None and hs_pct is not None and hs_pct > 100:
+                hs_i = int(hs_pct)
+                hs_pct = None
+            elif hs_m is not None and "%" not in str(hs_m) and _to_float(hs_m) is not None:
+                if _to_float(hs_m) <= 50 and "." not in str(hs_m):
+                    maybe = _to_int(hs_m)
+                    if maybe and maybe == _to_int(hs_m):
+                        pass
+
+            kd_f = _to_float(kd_m)
+            if kd_f is None and d_i:
+                kd_f = round(k_i / max(d_i, 1), 2)
+            elif kd_f is not None:
+                kd_f = round(kd_f, 2)
+
+            kr_m = _to_float(_sget(stats, "K/R Ratio", "K/R", "kr"))
+            if kr_m is not None:
+                kr_m = round(kr_m, 2)
+            adr_m = _to_float(
+                _sget(stats, "ADR", "Average Damage per Round", "Damage/Round")
+            )
+            if adr_m is not None:
+                adr_m = round(adr_m, 1)
+
+            mvps_raw = _sget(stats, "MVPs", "MVP", "mvps")
+            mvps_i = _to_int(mvps_raw) if mvps_raw not in (None, "") else None
+
+            triple = _to_int(_sget(stats, "Triple Kills", "Triple kills") or 0)
+            quadro = _to_int(
+                _sget(stats, "Quadro Kills", "Quadra Kills", "Quadro kills") or 0
+            )
+            penta = _to_int(
+                _sget(stats, "Penta Kills", "Penta Kills", "Ace") or 0
+            )
+            utility = _to_int(
+                _sget(stats, "Utility Damage", "Utility damage") or 0
+            )
+            flash = _to_int(
+                _sget(stats, "Flash Count", "Enemies Flashed", "Flashes") or 0
+            )
 
             played_at = None
             date_raw = (
@@ -1420,21 +1475,31 @@ class ProfileSyncService:
                         ts //= 1000
                     played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
                 except Exception:
-                    played_at = str(date_raw)[:10]
+                    s = str(date_raw).strip()
+                    if len(s) >= 10 and s[4] == "-":
+                        played_at = s[:10]
+                        try:
+                            played_at = datetime.strptime(s[:10], "%Y-%m-%d").strftime(
+                                "%d.%m.%Y"
+                            )
+                        except Exception:
+                            played_at = s[:10]
+                    else:
+                        played_at = s[:10]
 
             verdict = None
             try:
-                kd_f = float(str(kd_m).replace(",", "."))
-                if kd_f >= 1.4:
-                    verdict = {"label": "Great", "tone": "great"}
-                elif kd_f >= 1.1:
-                    verdict = {"label": "Good", "tone": "good"}
-                elif kd_f >= 0.85:
-                    verdict = {"label": "OK", "tone": "neutral"}
-                elif kd_f >= 0.6:
-                    verdict = {"label": "Bad", "tone": "bad"}
-                else:
-                    verdict = {"label": "Rough", "tone": "terrible"}
+                if kd_f is not None:
+                    if kd_f >= 1.4:
+                        verdict = {"label": "Great", "tone": "great"}
+                    elif kd_f >= 1.1:
+                        verdict = {"label": "Good", "tone": "good"}
+                    elif kd_f >= 0.85:
+                        verdict = {"label": "OK", "tone": "neutral"}
+                    elif kd_f >= 0.6:
+                        verdict = {"label": "Bad", "tone": "bad"}
+                    else:
+                        verdict = {"label": "Rough", "tone": "terrible"}
             except Exception:
                 verdict = None
 
@@ -1446,39 +1511,42 @@ class ProfileSyncService:
             elo_change = None
             if elo_raw is not None and str(elo_raw).strip() != "":
                 try:
-                    elo_change = int(float(str(elo_raw).replace(",", ".").replace("+", "")))
+                    elo_change = int(
+                        float(str(elo_raw).replace(",", ".").replace("+", ""))
+                    )
                 except (TypeError, ValueError):
                     elo_change = None
 
-            details = [
-                {"label": "Счёт", "value": score or "—"},
-                {"label": "K/D", "value": kd_m or "—"},
-                {"label": "HS %", "value": hs_m or "—"},
-                {"label": "Карта", "value": map_name},
-            ]
-            elo_sub = ""
-            if elo_change is not None:
-                sign = "+" if elo_change > 0 else ""
-                details.insert(0, {"label": "ELO", "value": f"{sign}{elo_change}"})
-                elo_sub = f" · {sign}{elo_change} ELO"
-
-            k_i = _to_int(kills)
-            d_i = _to_int(deaths)
-            a_i = _to_int(assists)
-            hs_i = _to_int(hs_m) if hs_m is not None else None
-            hs_pct = _to_float(hs_m)
-
-            kd_f = _to_float(kd_m)
-            if kd_f is None and d_i:
-                kd_f = round(k_i / d_i, 2)
-            elif kd_f is not None:
-                kd_f = round(kd_f, 2)
+            r_w = r_l = None
+            if score and ("/" in str(score) or ":" in str(score)):
+                try:
+                    parts = (
+                        str(score)
+                        .replace(":", "/")
+                        .replace(" ", "")
+                        .split("/")
+                    )
+                    a, b = int(parts[0]), int(parts[1])
+                    if won is True:
+                        r_w, r_l = max(a, b), min(a, b)
+                    elif won is False:
+                        r_w, r_l = min(a, b), max(a, b)
+                    else:
+                        r_w, r_l = a, b
+                except Exception:
+                    pass
 
             details = [
                 {"label": "Карта", "value": map_name or "—"},
                 {"label": "Счёт", "value": score or "—"},
-                {"label": "K/D", "value": kd_f if kd_f is not None else (kd_m or "—")},
-                {"label": "HS %", "value": hs_pct if hs_pct is not None else (hs_m or "—")},
+                {"label": "K/D", "value": kd_f if kd_f is not None else "—"},
+                {"label": "K/R", "value": kr_m if kr_m is not None else "—"},
+                {"label": "ADR", "value": adr_m if adr_m is not None else "—"},
+                {
+                    "label": "HS %",
+                    "value": hs_pct if hs_pct is not None else (hs_m or "—"),
+                },
+                {"label": "MVP", "value": mvps_i if mvps_i is not None else "—"},
                 {"label": "Kills", "value": k_i},
                 {"label": "Deaths", "value": d_i},
                 {"label": "Assists", "value": a_i},
@@ -1486,33 +1554,42 @@ class ProfileSyncService:
             if elo_change is not None:
                 sign = "+" if elo_change > 0 else ""
                 details.insert(0, {"label": "ELO", "value": f"{sign}{elo_change}"})
-
-            # MVP если есть в stats
-            mvps = _sget(stats, "MVPs", "MVP", "mvps")
-            mvps_i = _to_int(mvps) if mvps not in (None, "") else None
-            if mvps_i is not None:
-                details.append({"label": "MVP", "value": mvps_i})
+            if triple or quadro or penta:
+                details.append({
+                    "label": "Multi",
+                    "value": f"{triple}T / {quadro}Q / {penta}P",
+                })
+            if utility:
+                details.append({"label": "Util DMG", "value": utility})
+            if flash:
+                details.append({"label": "Flashes", "value": flash})
 
             match_history.append({
                 "won": won,
                 "title": map_name or "Faceit",
-                "subtitle": f"{k_i}/{d_i}/{a_i}",  # без · — проще для extractHint
+                "subtitle": f"{k_i}/{d_i}/{a_i}",
                 "duration": None,
                 "match_id": match_id,
                 "played_at": played_at,
                 "verdict": verdict,
                 "elo_change": elo_change,
                 "solo": None,
-                # для AI / фронта
                 "map": map_name,
+                "score": score,
                 "kills": k_i,
                 "deaths": d_i,
                 "assists": a_i,
                 "kd": kd_f,
-                "headshots": hs_i,
+                "kr": kr_m,
+                "adr": adr_m,
                 "hs_percent": hs_pct,
+                "headshots": hs_i,
                 "mvps": mvps_i,
-                "score": score,
+                "triple_kills": triple,
+                "quadro_kills": quadro,
+                "penta_kills": penta,
+                "rounds_won": r_w,
+                "rounds_lost": r_l,
                 "details": details,
             })
 
@@ -1523,23 +1600,17 @@ class ProfileSyncService:
             elif m["won"] is False:
                 form.append("L")
 
-        n = 0
-        sum_k = sum_d = sum_a = 0
-        sum_hs = 0
-        hs_n = 0
+        n = sum_k = sum_d = sum_a = 0
+        sum_hs = hs_n = 0
         for m in match_history[:20]:
-            parts = (m.get("subtitle") or "").split("·")[0].strip().split("/")
-            if len(parts) >= 3:
-                sum_k += _to_int(parts[0])
-                sum_d += _to_int(parts[1])
-                sum_a += _to_int(parts[2])
+            if m.get("kills") is not None:
+                sum_k += _to_int(m["kills"])
+                sum_d += _to_int(m.get("deaths"))
+                sum_a += _to_int(m.get("assists"))
                 n += 1
-            for det in m.get("details") or []:
-                if det.get("label") in ("HS %", "HS"):
-                    hv = _to_float(det.get("value"))
-                    if hv is not None:
-                        sum_hs += hv
-                        hs_n += 1
+            if m.get("hs_percent") is not None:
+                sum_hs += float(m["hs_percent"])
+                hs_n += 1
 
         avg_kills = round(sum_k / n, 1) if n else None
         avg_deaths = round(sum_d / n, 1) if n else None
@@ -1580,9 +1651,15 @@ class ProfileSyncService:
         if player.get("avatar"):
             self.account.avatar = player.get("avatar")
 
-        self.account.save(update_fields=[
-            "extra_stats", "game_label", "nickname", "skill_rating", "avatar",
-        ])
+        self.account.save(
+            update_fields=[
+                "extra_stats",
+                "game_label",
+                "nickname",
+                "skill_rating",
+                "avatar",
+            ]
+        )
         
     def _sync_roblox(self):
         from datetime import datetime
