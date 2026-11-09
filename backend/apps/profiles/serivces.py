@@ -1359,6 +1359,32 @@ class ProfileSyncService:
                     return stats[k]
             return default
 
+        def _fmt_ts(ts):
+            try:
+                ts = int(float(ts))
+                if ts > 10_000_000_000:
+                    ts //= 1000
+                return datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
+            except Exception:
+                return None
+
+        # даты из /history (в recent stats их часто нет)
+        match_dates = {}
+        try:
+            hist_payload = client.get_history(player_id, game=game_id, limit=20)
+            for h in hist_payload.get("items") or []:
+                mid = str(h.get("match_id") or h.get("id") or "").strip()
+                if not mid:
+                    continue
+                ts = h.get("finished_at") or h.get("started_at") or h.get("scheduled_at")
+                if ts is None:
+                    continue
+                formatted = _fmt_ts(ts)
+                if formatted:
+                    match_dates[mid] = formatted
+        except Exception:
+            match_dates = {}
+
         match_history = []
         items = []
         try:
@@ -1392,10 +1418,12 @@ class ProfileSyncService:
                 won = True
             elif str(result) in ("0", "Loss", "loss", "L"):
                 won = False
+            if won is None and item.get("results"):
+                w = (item.get("results") or {}).get("winner")
 
-            kills = _sget(stats, "Kills", "kills") or "0"
-            deaths = _sget(stats, "Deaths", "deaths") or "0"
-            assists = _sget(stats, "Assists", "assists") or "0"
+            kills = _sget(stats, "Kills", "kills") or item.get("kills") or "0"
+            deaths = _sget(stats, "Deaths", "deaths") or item.get("deaths") or "0"
+            assists = _sget(stats, "Assists", "assists") or item.get("assists") or "0"
             kd_m = _sget(stats, "K/D Ratio", "K/D", "kd")
             hs_m = _sget(stats, "Headshots %", "HS %", "Headshots")
             map_name = (
@@ -1423,11 +1451,6 @@ class ProfileSyncService:
             if hs_m is not None and hs_pct is not None and hs_pct > 100:
                 hs_i = int(hs_pct)
                 hs_pct = None
-            elif hs_m is not None and "%" not in str(hs_m) and _to_float(hs_m) is not None:
-                if _to_float(hs_m) <= 50 and "." not in str(hs_m):
-                    maybe = _to_int(hs_m)
-                    if maybe and maybe == _to_int(hs_m):
-                        pass
 
             kd_f = _to_float(kd_m)
             if kd_f is None and d_i:
@@ -1466,26 +1489,29 @@ class ProfileSyncService:
                 item.get("date")
                 or item.get("finished_at")
                 or item.get("started_at")
-                or _sget(stats, "Date")
+                or item.get("created_at")
+                or item.get("scheduled_at")
+                or _sget(stats, "Date", "date")
             )
-            if date_raw:
-                try:
-                    ts = int(date_raw)
-                    if ts > 10_000_000_000:
-                        ts //= 1000
-                    played_at = datetime.utcfromtimestamp(ts).strftime("%d.%m.%Y")
-                except Exception:
-                    s = str(date_raw).strip()
-                    if len(s) >= 10 and s[4] == "-":
-                        played_at = s[:10]
-                        try:
+            if date_raw is not None and date_raw != "":
+                if isinstance(date_raw, (int, float)) or str(date_raw).strip().isdigit():
+                    played_at = _fmt_ts(date_raw)
+                else:
+                    try:
+                        s = str(date_raw).strip().replace("Z", "").split("+")[0]
+                        if len(s) >= 10 and s[4] == "-":
                             played_at = datetime.strptime(s[:10], "%Y-%m-%d").strftime(
                                 "%d.%m.%Y"
                             )
-                        except Exception:
+                        elif len(s) >= 10 and s[2] == ".":
                             played_at = s[:10]
-                    else:
-                        played_at = s[:10]
+                        else:
+                            played_at = s[:10]
+                    except Exception:
+                        played_at = None
+
+            if not played_at and match_id and match_id in match_dates:
+                played_at = match_dates[match_id]
 
             verdict = None
             try:
@@ -1521,10 +1547,7 @@ class ProfileSyncService:
             if score and ("/" in str(score) or ":" in str(score)):
                 try:
                     parts = (
-                        str(score)
-                        .replace(":", "/")
-                        .replace(" ", "")
-                        .split("/")
+                        str(score).replace(":", "/").replace(" ", "").split("/")
                     )
                     a, b = int(parts[0]), int(parts[1])
                     if won is True:
@@ -1658,9 +1681,10 @@ class ProfileSyncService:
                 "nickname",
                 "skill_rating",
                 "avatar",
+                "last_synced_at",
             ]
         )
-        
+
     def _sync_roblox(self):
         from datetime import datetime
         from .integrations.roblox_client import RobloxClient
