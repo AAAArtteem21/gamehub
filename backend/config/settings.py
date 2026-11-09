@@ -153,16 +153,19 @@ TEMPLATES = [
 ]
 
 
+_db_host = config("DB_HOST", default="localhost")
+_is_local = _db_host in ("localhost", "127.0.0.1")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": config("DB_NAME"),
         "USER": config("DB_USER"),
         "PASSWORD": config("DB_PASSWORD"),
-        "HOST": config("DB_HOST"),
+        "HOST": _db_host,
         "PORT": config("DB_PORT", default="5432"),
         "OPTIONS": {
-            "sslmode": "require",
+            "sslmode": "disable" if _is_local else "require",
         },
     }
 }
