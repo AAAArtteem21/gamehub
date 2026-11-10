@@ -17,7 +17,7 @@ WEEKLY_GAMES = {
     "opendota": {"key": "dota2", "label": "Dota 2"},
     "dota2": {"key": "dota2", "label": "Dota 2"},
     "valorant": {"key": "valorant", "label": "Valorant"},
-    "faceit": {"key": "cs2", "label": "CS2"},
+    "faceit": {"key": "faceit", "label": "Faceit"},
     "deadlock": {"key": "deadlock", "label": "Deadlock"},
 }
 
@@ -234,8 +234,8 @@ class ComparePlayersView(APIView):
             platform = "opendota"
         if game_filter in ("opendota", "dota"):
             game_filter = "dota2"
-        if game_filter in ("faceit", "csgo"):
-            game_filter = "cs2"
+        if game_filter in ("faceit", "csgo", "cs2"):
+            game_filter = "faceit"
 
         me_block = self._user_block(request.user)
 
