@@ -269,10 +269,10 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
   position: fixed;
   left: 0;
   top: var(--topbar-h);
-  padding: 14px 12px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   overflow-y: auto;
   box-sizing: border-box;
   z-index: 40;
@@ -280,19 +280,19 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
   flex-shrink: 0;
-  padding: 8px;
-  background: var(--panel-bg, var(--bg-card));
-  border: 1px solid var(--panel-border, var(--border-color));
-  border-radius: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
   border: 1px solid transparent;
   color: var(--text-secondary);
   text-decoration: none;
@@ -301,22 +301,23 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 }
 .nav-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
 .nav-item.active {
-  background: var(--accent-dim);
-  border-color: var(--accent);
+  background: var(--bg-card-hover);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 .nav-icon {
   width: 20px; height: 20px;
   display: flex; align-items: center; justify-content: center;
-  color: var(--accent);
+  color: var(--text-secondary);
 }
 .nav-icon :deep(svg) { width: 18px; height: 18px; }
+.nav-item.active .nav-icon { color: var(--accent); }
 
 .sidebar-widget {
   background: var(--panel-bg, var(--bg-card));
   border: 1px solid var(--panel-border, var(--border-color));
-  border-radius: 14px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -326,11 +327,10 @@ watch(() => auth.isAuthenticated, (v) => (v ? loadPersonal() : resetPersonal()))
 .widget-head { display: flex; justify-content: space-between; align-items: center; }
 .widget-star { color: var(--accent); font-size: 14px; }
 .widget-title {
-  font-size: 10px;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 700;
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0;
+  font-weight: 600;
 }
 .widget-row {
   display: flex;
