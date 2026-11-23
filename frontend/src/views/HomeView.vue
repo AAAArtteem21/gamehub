@@ -4,18 +4,6 @@ import { useRouter } from 'vue-router'
 import api from '../api/axios'
 import ClanIcon from '../components/clans/ClanIcon.vue'
 import { useAuthStore } from '../stores/auth'
-import logo from '../assets/images/logo.png'
-
-/**
- * Арт для баннера (необязательно).
- * Положи картинку в src/assets/images/hero-bg.jpg (или .png/.webp) — подхватится сама.
- * Если файла нет, рисуется красный градиент.
- */
-const heroModules = import.meta.glob('../assets/images/hero-bg.{jpg,jpeg,png,webp}', {
-  eager: true,
-  import: 'default',
-})
-const heroBg = Object.values(heroModules)[0] || null
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -200,21 +188,14 @@ onMounted(() => {
     <div class="home-grid">
       <!-- ============ Левая (основная) колонка ============ -->
       <div class="col-main">
-        <!-- Баннер -->
+        <!-- Основные сценарии -->
         <div class="hero card">
-          <div
-            v-if="heroBg"
-            class="hero-art"
-            :style="{ backgroundImage: `url(${heroBg})` }"
-          ></div>
           <div class="hero-content">
-            <div class="hero-logo">
-              <img :src="logo" alt="" />
-            </div>
             <div class="hero-text">
-              <h1>Команда под твой ранг и стиль</h1>
+              <p class="hero-eyebrow">GameEyes · Игровое сообщество</p>
+              <h1>Играй в хорошей команде</h1>
               <p class="hero-sub">
-                LFG, кланы и статистика с привязанных аккаунтов — без выдуманных профилей.
+                Найди тиммейтов, вступи в клан и следи за матчами в одном месте.
               </p>
               <div class="hero-actions">
                 <button type="button" class="btn-primary" @click="router.push('/lfg')">
@@ -517,8 +498,8 @@ onMounted(() => {
 
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 20px;
   align-items: start;
   width: 100%;
 }
@@ -526,7 +507,7 @@ onMounted(() => {
 .col-side {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   min-width: 0;
 }
 
@@ -534,73 +515,50 @@ onMounted(() => {
 .hero {
   position: relative;
   overflow: hidden;
-  padding: 0 !important;
-  min-height: 150px;
+  padding: 28px 30px !important;
+  min-height: 204px;
   display: flex;
   align-items: center;
-  background:
-    linear-gradient(90deg, var(--bg-card) 0%, color-mix(in srgb, var(--bg-card) 70%, transparent) 40%, transparent 80%),
-    radial-gradient(ellipse 60% 120% at 88% 20%, rgba(230, 57, 70, 0.45), transparent 60%),
-    repeating-linear-gradient(115deg, transparent 0 26px, rgba(230, 57, 70, 0.07) 26px 30px),
-    var(--bg-sunken);
+  background: var(--bg-card);
 }
-.hero-art {
+.hero::after {
+  content: '';
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 62%;
-  background-size: cover;
-  background-position: center;
-  opacity: 0.9;
-  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 45%);
-  mask-image: linear-gradient(to right, transparent 0%, #000 45%);
-  pointer-events: none;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
 }
 .hero-content {
   position: relative;
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 20px 22px;
+  gap: 24px;
   width: 100%;
 }
-.hero-logo {
-  width: 56px;
-  height: 56px;
-  flex-shrink: 0;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent-dim);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  box-shadow: 0 0 22px var(--glow-soft, rgba(230, 57, 70, 0.25));
-  align-self: flex-start;
-}
-.hero-logo img {
-  width: 36px;
-  height: 36px;
-  object-fit: contain;
+.hero-eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
 }
 .hero-text { min-width: 0; }
 .hero h1 {
-  margin: 0 0 6px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+  font-size: clamp(24px, 2.4vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
 }
 .hero-sub {
-  margin: 0 0 14px;
+  margin: 0 0 18px;
   color: var(--text-secondary);
-  max-width: 400px;
-  font-size: 13px;
+  max-width: 500px;
+  font-size: 14px;
   line-height: 1.45;
 }
 .hero-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -703,11 +661,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 .sh-ico {
   width: 18px;
@@ -1035,8 +991,7 @@ onMounted(() => {
   .home-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .hero h1 { font-size: 18px; }
-  .hero-content { flex-direction: column; align-items: flex-start; }
-  .hero-art { width: 100%; opacity: 0.35; }
+  .hero { min-height: 0; padding: 22px !important; }
+  .hero h1 { font-size: 24px; }
 }
 </style>

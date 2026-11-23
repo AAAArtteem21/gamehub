@@ -188,8 +188,8 @@ onUnmounted(() => {
     <RouterLink to="/" class="brand">
       <img :src="logo" alt="GameEyes" class="brand-mark" />
       <div class="brand-text">
-        <span class="brand-name">GAME<span class="accent-text">EYES</span></span>
-        <span class="brand-tag">find · play · win</span>
+        <span class="brand-name">Game<span class="accent-text">Eyes</span></span>
+        <span class="brand-tag">Игровое сообщество</span>
       </div>
     </RouterLink>
 
@@ -402,10 +402,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 16px;
   padding: 0 20px;
-  background: color-mix(in srgb, var(--bg-sunken) 88%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--bg-primary);
   border-bottom: 1px solid var(--panel-border);
-  box-shadow: 0 6px 24px -14px var(--glow);
+  box-shadow: none;
   z-index: 60;
 }
 
@@ -418,11 +417,11 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .brand-mark {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   object-fit: contain;
   flex-shrink: 0;
-  filter: drop-shadow(0 0 8px var(--glow));
+  filter: none;
 }
 .brand-text {
   display: flex;
@@ -431,20 +430,19 @@ onUnmounted(() => {
   min-width: 0;
 }
 .brand-name {
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: 17px;
   color: var(--text-primary);
 }
 .accent-text {
   color: var(--accent);
 }
 .brand-tag {
-  font-size: 9px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--accent);
-  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .burger {
@@ -493,8 +491,8 @@ onUnmounted(() => {
   width: 100%;
   background: var(--bg-card);
   border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  padding: 10px 16px 10px 40px;
+  border-radius: 10px;
+  padding: 9px 14px 9px 38px;
   color: var(--text-primary);
   font-size: 13px;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -502,7 +500,7 @@ onUnmounted(() => {
 .search input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  box-shadow: none;
 }
 
 .suggest-box {
@@ -572,9 +570,9 @@ onUnmounted(() => {
 
 .icon-pill {
   position: relative;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   border: 1px solid var(--panel-border);
   background: var(--bg-card);
   color: var(--text-secondary);
@@ -582,14 +580,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s, border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .icon-pill:hover,
 .icon-pill.active {
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
-  box-shadow: 0 0 16px var(--glow-soft);
+  box-shadow: none;
 }
 .pill-ico {
   width: 19px;

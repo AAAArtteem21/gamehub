@@ -65,7 +65,7 @@ watch(() => route.fullPath, closeSidebar)
 }
 .content {
   flex: 1;
-  padding: 20px 24px 32px;
+  padding: 24px 28px 36px;
   width: 100%;
   max-width: none;
   box-sizing: border-box;
@@ -76,8 +76,8 @@ watch(() => route.fullPath, closeSidebar)
 
 /* —— Футер с юридической пометкой —— */
 .site-footer {
-  margin: 0 24px;
-  padding: 16px 0 22px;
+  margin: 0 28px;
+  padding: 18px 0 24px;
   border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
@@ -96,8 +96,7 @@ watch(() => route.fullPath, closeSidebar)
 }
 .copy {
   font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   color: var(--text-muted);
   opacity: 0.7;
 }
@@ -108,10 +107,10 @@ watch(() => route.fullPath, closeSidebar)
     width: 100%;
   }
   .content {
-    padding: 14px 14px 24px;
+    padding: 18px 16px 28px;
   }
   .site-footer {
-    margin: 0 14px;
+    margin: 0 16px;
     padding: 14px 0 18px;
   }
   .sidebar-backdrop {
